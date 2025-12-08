@@ -1,0 +1,8 @@
+node_modules
+dist
+.vitest
+coverage
+.env
+.DS_Store
+
+profiles.json

@@ -1,0 +1,36 @@
+{
+  "name": "@dodefey/deploy",
+  "version": "0.1.0",
+  "description": "A small, gunshi-based CLI app for deploying PM2 managed projects. Configurable with different deploy profiles. Runs test, build, syncs build to server and handles PM2 start/restart",
+  "license": "MIT",
+  "author": "David Odefey",
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "deploy": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "eslint ."
+  },
+  "prettier": {
+    "tabWidth": 4,
+    "useTabs": true,
+    "semi": false
+  },
+  "dependencies": {
+    "gunshi": "^0.26.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "jiti": "^2.6.1",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.49.0",
+    "vitest": "^4.0.15"
+  }
+}

@@ -1,0 +1,12 @@
+.vscode/
+.github/
+coverage/
+node_modules/
+dist/*.map
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+# keep build output; exclude sources not needed at runtime
+tests/
+docs/
+**/*.spec.ts
