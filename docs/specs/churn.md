@@ -47,7 +47,7 @@ buildDir/public/_nuxt
 Stored at:
 
 ```
-remoteDir/.deploy/client-manifests/_nuxt-manifest.sha
+remoteDir/.deploy/manifest
 ```
 
 Reasoning:

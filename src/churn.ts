@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs"
 import * as path from "node:path"
 
 const CLIENT_SUBDIR = "public/_nuxt"
-const CLIENT_MANIFEST_NAME = "_nuxt-manifest.sha"
+const CLIENT_MANIFEST_NAME = "manifest"
 
 const DEFAULT_SSH_OPTS = [
 	"-4",
@@ -129,7 +129,7 @@ async function ensureClientDirectory(dir: string): Promise<void> {
 
 export function buildRemoteManifestPath(remoteDir: string): string {
 	// Keep the manifest outside the rsync'd .output tree so it survives deploys.
-	return `${remoteDir}/.deploy/client-manifests/${CLIENT_MANIFEST_NAME}`
+	return `${remoteDir}/.deploy/${CLIENT_MANIFEST_NAME}`
 }
 
 async function directoryExists(dir: string): Promise<boolean> {

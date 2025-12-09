@@ -277,12 +277,10 @@ describe("normalizeManifestPath", () => {
 })
 
 describe("buildRemoteManifestPath", () => {
-	it("builds path under .deploy/client-manifests", async () => {
+	it("builds path under .deploy", async () => {
 		const { buildRemoteManifestPath } = await modulePromise
 		const remoteDir = "/var/www/test"
 		const pathBuilt = buildRemoteManifestPath(remoteDir)
-		expect(pathBuilt).toBe(
-			"/var/www/test/.deploy/client-manifests/_nuxt-manifest.sha",
-		)
+		expect(pathBuilt).toBe("/var/www/test/.deploy/manifest")
 	})
 })

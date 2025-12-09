@@ -96,7 +96,7 @@ node dist/cli.js deploy \
 3. **Build**: Run the profile-defined build command (via `runBuild`); stdout mode per `--verbose`.
 4. **Sync**: `rsync` local `.output` to `${remoteDir}/.output` (or override), honors `--dryRun`.
 5. **PM2**: `pm2 startOrReload` (or `reboot`) app in `remoteDir`; reports instance count.
-6. **Churn**: Compute client bundle churn vs previous manifest stored at `${remoteDir}/.deploy/client-manifests/_nuxt-manifest.sha`; uploads new manifest unless `--dryRun`.
+6. **Churn**: Compute client bundle churn vs previous manifest stored at `${remoteDir}/.deploy/manifest`; uploads new manifest unless `--dryRun`.
 
 ## Scripts
 

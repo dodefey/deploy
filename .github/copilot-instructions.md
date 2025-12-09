@@ -13,7 +13,7 @@ Modules and contracts
 - Tests: `src/test.ts` `runTests()` default `npx vitest run`; same outputMode pattern; errors TEST_COMMAND_NOT_FOUND/TEST_FAILED/TEST_INTERRUPTED.
 - Sync: `src/syncBuild.ts` rsync local `.output` to `${remoteDir}/.output`; validates local dir; dryRun skips remote mkdir and uses rsync --dry-run; errors SYNC_NO_LOCAL_OUTPUT_DIR/SYNC_SSH_FAILED/SYNC_RSYNC_FAILED.
 - PM2: `src/pm2.ts` uploads `ecosystem.config.js` if changed, then startOrReload or reboot (delete+start), verifies via `pm2 jlist` with retries; errors include PM2_SSH_FAILED/PM2_CONFIG_COMPARE_FAILED/PM2_CONFIG_UPLOAD_FAILED/PM2_COMMAND_FAILED/PM2_STATUS_QUERY_FAILED/PM2_HEALTHCHECK_FAILED/PM2_APP_NAME_NOT_FOUND.
-- Churn: `src/churn.ts` builds local manifest from `buildDir/public/_nuxt`, compares to remote `${remoteDir}/.deploy/client-manifests/_nuxt-manifest.sha`, uploads unless dryRun; errors CHURN_NO_CLIENT_DIR/CHURN_REMOTE_MANIFEST_FETCH_FAILED/CHURN_REMOTE_MANIFEST_UPLOAD_FAILED/CHURN_COMPUTE_FAILED. Formatting in `src/churnFormat.ts` (3-line summary, 1-decimal percentages, KB/MB).
+- Churn: `src/churn.ts` builds local manifest from `buildDir/public/_nuxt`, compares to remote `${remoteDir}/.deploy/manifest`, uploads unless dryRun; errors CHURN_NO_CLIENT_DIR/CHURN_REMOTE_MANIFEST_FETCH_FAILED/CHURN_REMOTE_MANIFEST_UPLOAD_FAILED/CHURN_COMPUTE_FAILED. Formatting in `src/churnFormat.ts` (3-line summary, 1-decimal percentages, KB/MB).
 - Logging: `src/deployLogging.ts` centralizes logging and formatting; use it instead of console; exposes logDeployStart/logPhaseStart/logFatalError/logNonFatalError etc.
 
 Output handling pattern
@@ -31,7 +31,7 @@ Conventions and guardrails
 - Preserve typed error codes via Error.cause; do not change without spec alignment.
 - Keep fatal vs non-fatal phase semantics intact; churn-only failures are fatal.
 - Do not emit console logs from modules; logging flows through deployLogging; modules remain pure/side-effect-limited.
-- Keep manifests outside rsync tree: remote manifests live in `.deploy/client-manifests/` to survive sync deletes.
+- Keep manifests outside rsync tree: remote manifests live in `.deploy/` to survive sync deletes.
 - Default paths: local buildDir `.output`; client assets under `public/_nuxt`.
 
 When modifying behavior
