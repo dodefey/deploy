@@ -46,11 +46,10 @@ const REQUIRED_PROFILE_STRING_FIELDS: ReadonlyArray<{
 	{ key: "env" },
 	{ key: "pm2AppName" },
 ]
+const PROFILES_FILENAME = "profiles.json"
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url))
+const PROFILES_PATH_OVERRIDE_ENV = "DEPLOY_PROFILES_PATH"
 // Profiles are defined in profiles.json to keep deploy targets out of code.
-const profilesJsonPath = path.resolve(
-	path.dirname(fileURLToPath(import.meta.url)),
-	"profiles.json",
-)
 const PROFILE_FILE_ERROR_MESSAGE =
 	"profiles.json is missing, invalid, or empty; expected at least one deploy profile"
 
@@ -238,16 +237,38 @@ function normalizeProfiles(source: unknown): TProfile[] {
 }
 
 // Keep sync loader since deploy CLI runs in a short-lived process.
-function loadProfilesFromDisk(): unknown {
-	try {
-		const json = readFileSync(profilesJsonPath, "utf8")
-		return JSON.parse(json)
-	} catch {
-		throw configError(
-			"CONFIG_PROFILE_FILE_NOT_FOUND",
-			PROFILE_FILE_ERROR_MESSAGE,
+function resolveProfilesSearchPaths(): string[] {
+	const paths: string[] = []
+	const overridePath = process.env[PROFILES_PATH_OVERRIDE_ENV]
+	if (overridePath) {
+		paths.push(
+			path.isAbsolute(overridePath)
+				? overridePath
+				: path.resolve(process.cwd(), overridePath),
 		)
 	}
+	paths.push(path.resolve(process.cwd(), PROFILES_FILENAME))
+	const modulePath = path.resolve(MODULE_DIR, PROFILES_FILENAME)
+	if (!paths.includes(modulePath)) {
+		paths.push(modulePath)
+	}
+	return paths
+}
+
+function loadProfilesFromDisk(): unknown {
+	for (const candidatePath of resolveProfilesSearchPaths()) {
+		try {
+			const json = readFileSync(candidatePath, "utf8")
+			return JSON.parse(json)
+		} catch {
+			continue
+		}
+	}
+
+	throw configError(
+		"CONFIG_PROFILE_FILE_NOT_FOUND",
+		PROFILE_FILE_ERROR_MESSAGE,
+	)
 }
 
 function configError(code: TConfigErrorCode, message: string): Error {
