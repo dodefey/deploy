@@ -147,14 +147,14 @@ Steps:
 
 1. Lookup profile → else throw `CONFIG_PROFILE_NOT_FOUND`
 2. Apply defaults:
-	- `buildDir = profile.buildDir ?? ".output"`
-	- `pm2RestartMode = profile.pm2RestartMode ?? "startOrReload"`
+    - `buildDir = profile.buildDir ?? ".output"`
+    - `pm2RestartMode = profile.pm2RestartMode ?? "startOrReload"`
 3. Validate required fields:
-	- Required strings: `sshConnectionString`, `remoteDir`, `env`, `pm2AppName` → non-empty after trimming, else `CONFIG_PROFILE_INVALID`.
-	- Build command: `buildCommand` must be a non-empty string; missing/whitespace → `CONFIG_PROFILE_INVALID`.
-	- Build args: `buildArgs` must be a non-empty string array; missing/empty/non-string/whitespace entries → `CONFIG_PROFILE_INVALID`.
-	- Profile names must be unique; enforce uniqueness once at load time.
-	- Optional string fields, if provided, must be non-empty after trimming; otherwise defaults apply.
+    - Required strings: `sshConnectionString`, `remoteDir`, `env`, `pm2AppName` → non-empty after trimming, else `CONFIG_PROFILE_INVALID`.
+    - Build command: `buildCommand` must be a non-empty string; missing/whitespace → `CONFIG_PROFILE_INVALID`.
+    - Build args: `buildArgs` must be a non-empty string array; missing/empty/non-string/whitespace entries → `CONFIG_PROFILE_INVALID`.
+    - Profile names must be unique; enforce uniqueness once at load time.
+    - Optional string fields, if provided, must be non-empty after trimming; otherwise defaults apply.
 4. Return resolved config including `buildCommand` and `buildArgs`.
 
 Example return:

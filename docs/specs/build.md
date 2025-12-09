@@ -22,36 +22,36 @@ Single entrypoint:
 export type TBuildOutputMode = "inherit" | "silent" | "callbacks"
 
 export interface TBuildCommand {
-    command: string // e.g. "npx", "pnpm"
-    args: string[] // e.g. ["nuxt", "build", "--dotenv", ".env.production"]
+	command: string // e.g. "npx", "pnpm"
+	args: string[] // e.g. ["nuxt", "build", "--dotenv", ".env.production"]
 }
 
 export interface TBuildOptions {
-    // Working directory for the process; defaults to process.cwd()
-    rootDir?: string
+	// Working directory for the process; defaults to process.cwd()
+	rootDir?: string
 
-    // Extra env to merge into process.env when spawning the build
-    env?: Record<string, string>
+	// Extra env to merge into process.env when spawning the build
+	env?: Record<string, string>
 
-    // How to handle build output
-    // "inherit"  -> child stdout/stderr inherit
-    // "silent"   -> ignore stdout/stderr
-    // "callbacks"-> pipe and forward line-by-line
-    outputMode?: TBuildOutputMode // default: "inherit"
+	// How to handle build output
+	// "inherit"  -> child stdout/stderr inherit
+	// "silent"   -> ignore stdout/stderr
+	// "callbacks"-> pipe and forward line-by-line
+	outputMode?: TBuildOutputMode // default: "inherit"
 
-    // Optional callbacks when outputMode === "callbacks"
-    onStdoutLine?: (line: string) => void
-    onStderrLine?: (line: string) => void
+	// Optional callbacks when outputMode === "callbacks"
+	onStdoutLine?: (line: string) => void
+	onStderrLine?: (line: string) => void
 }
 
 export type TBuildErrorCode =
-    | "BUILD_COMMAND_NOT_FOUND"
-    | "BUILD_FAILED"
-    | "BUILD_INTERRUPTED"
+	| "BUILD_COMMAND_NOT_FOUND"
+	| "BUILD_FAILED"
+	| "BUILD_INTERRUPTED"
 
 export function runBuild(
-    command: TBuildCommand,
-    options?: TBuildOptions,
+	command: TBuildCommand,
+	options?: TBuildOptions,
 ): Promise<void>
 ```
 
@@ -129,9 +129,9 @@ Success semantics are unchanged across modes; output handling is orthogonal.
 
 ```ts
 type TSpawnLike = (
-    command: string,
-    args: string[],
-    options: SpawnOptions,
+	command: string,
+	args: string[],
+	options: SpawnOptions,
 ) => ChildProcess
 ```
 

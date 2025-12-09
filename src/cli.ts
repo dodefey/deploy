@@ -118,8 +118,7 @@ const deployCommand = define({
 		skipBuild: {
 			type: "boolean",
 			short: "k",
-			description:
-				"Skip build; reuse the existing build in buildDir",
+			description: "Skip build; reuse the existing build in buildDir",
 			default: false,
 		},
 		verbose: {

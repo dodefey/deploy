@@ -7,7 +7,7 @@ Keep `src/cli.ts` a **high-level deploy story** so that:
 - It reads as a **high-level deploy story** (tests → build → sync → pm2 → churn).
 - All detailed work is delegated to:
     - existing modules (`build`, `syncBuild`, `pm2`, `churn`)
-	- a few small, well-named helpers in `src/cli.ts`.
+    - a few small, well-named helpers in `src/cli.ts`.
 - Error handling is **centralized and consistent**.
 - There are **no behavioral changes** to deploy logic (same flags, same semantics, same exit behavior), only code organization and clarity improvements.
 
@@ -97,14 +97,14 @@ async function runChurnOnlyMode(values: TDeployArgs): Promise<void> { ... }
 **Behavior:**
 
 - `runTestPhase`
-	- If `values.skipTests` is true, log the skip message and return.
-	- Otherwise, call the test module (`runTests`) with the existing outputMode wiring.
-	- On error, treat as fatal.
+    - If `values.skipTests` is true, log the skip message and return.
+    - Otherwise, call the test module (`runTests`) with the existing outputMode wiring.
+    - On error, treat as fatal.
 
 - `runBuildPhase`
-	- If `values.skipBuild` is true, log the same “Skipping build” message as today and return.
-	- Otherwise, call the build module (`runBuild`) with the profile-provided `buildCommand`/`buildArgs` and the same outputMode wiring as before.
-    - On error, delegate to the new fatal error helper (see section 3).
+    - If `values.skipBuild` is true, log the same “Skipping build” message as today and return.
+    - Otherwise, call the build module (`runBuild`) with the profile-provided `buildCommand`/`buildArgs` and the same outputMode wiring as before.
+        - On error, delegate to the new fatal error helper (see section 3).
 
 - `runSyncPhase`
     - Call `runSyncBuild(values)` (or inline the thin wrapper) which calls `syncBuild` with the same options as before.
@@ -225,11 +225,11 @@ try {
 - **Fatal phases:**
     - Config resolution
     - Overrides
-	- Tests
-    - Build
-    - Sync
-    - Churn in `--churnOnly` mode  
-      must still **exit with non-zero** (1) on failure.
+    - Tests
+        - Build
+        - Sync
+        - Churn in `--churnOnly` mode  
+          must still **exit with non-zero** (1) on failure.
 
 - **Non-fatal phases:**
     - PM2 update
