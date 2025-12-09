@@ -4,6 +4,7 @@ import {
 	__resetProfilesLoaderForTest,
 	__setProfilesForTest,
 	__setProfilesLoaderForTest,
+	__testResolveProfilesSearchPaths,
 	listProfiles,
 	resolveProfile,
 	type TProfile,
@@ -358,5 +359,39 @@ describe("config module", () => {
 			() => __setProfilesForTest(profiles),
 			"CONFIG_DUPLICATE_PROFILE",
 		)
+	})
+
+	describe("profiles search paths", () => {
+		it("uses DEPLOY_PROFILES_PATH when absolute and then cwd/profiles.json", () => {
+			const cwd = "/project/root"
+			const override = "/custom/config/profiles.json"
+
+			const result = __testResolveProfilesSearchPaths(override, cwd)
+
+			expect(result).toEqual([
+				"/custom/config/profiles.json",
+				"/project/root/profiles.json",
+			])
+		})
+
+		it("resolves relative DEPLOY_PROFILES_PATH against cwd", () => {
+			const cwd = "/project/root"
+			const override = "config/profiles.json"
+
+			const result = __testResolveProfilesSearchPaths(override, cwd)
+
+			expect(result).toEqual([
+				"/project/root/config/profiles.json",
+				"/project/root/profiles.json",
+			])
+		})
+
+		it("uses only cwd/profiles.json when no override is set", () => {
+			const cwd = "/project/root"
+
+			const result = __testResolveProfilesSearchPaths(undefined, cwd)
+
+			expect(result).toEqual(["/project/root/profiles.json"])
+		})
 	})
 })

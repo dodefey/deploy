@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 
 export interface TProfile {
 	name: string
@@ -47,7 +46,6 @@ const REQUIRED_PROFILE_STRING_FIELDS: ReadonlyArray<{
 	{ key: "pm2AppName" },
 ]
 const PROFILES_FILENAME = "profiles.json"
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url))
 const PROFILES_PATH_OVERRIDE_ENV = "DEPLOY_PROFILES_PATH"
 // Profiles are defined in profiles.json to keep deploy targets out of code.
 const PROFILE_FILE_ERROR_MESSAGE =
@@ -189,6 +187,14 @@ export function __setProfilesLoaderForTest(loader: () => unknown): void {
 }
 
 /** @internal test-only */
+export function __testResolveProfilesSearchPaths(
+	overridePath: string | undefined,
+	cwd: string,
+): string[] {
+	return resolveProfilesSearchPathsInternal(overridePath, cwd)
+}
+
+/** @internal test-only */
 export function __resetProfilesLoaderForTest(): void {
 	if (!process.env.VITEST) {
 		throw new Error(
@@ -236,23 +242,27 @@ function normalizeProfiles(source: unknown): TProfile[] {
 	return source as TProfile[]
 }
 
-// Keep sync loader since deploy CLI runs in a short-lived process.
-function resolveProfilesSearchPaths(): string[] {
+function resolveProfilesSearchPathsInternal(
+	overridePath: string | undefined,
+	cwd: string,
+): string[] {
 	const paths: string[] = []
-	const overridePath = process.env[PROFILES_PATH_OVERRIDE_ENV]
 	if (overridePath) {
 		paths.push(
 			path.isAbsolute(overridePath)
 				? overridePath
-				: path.resolve(process.cwd(), overridePath),
+				: path.resolve(cwd, overridePath),
 		)
 	}
-	paths.push(path.resolve(process.cwd(), PROFILES_FILENAME))
-	const modulePath = path.resolve(MODULE_DIR, PROFILES_FILENAME)
-	if (!paths.includes(modulePath)) {
-		paths.push(modulePath)
-	}
+	paths.push(path.resolve(cwd, PROFILES_FILENAME))
 	return paths
+}
+
+// Keep sync loader since deploy CLI runs in a short-lived process.
+function resolveProfilesSearchPaths(): string[] {
+	const overridePath = process.env[PROFILES_PATH_OVERRIDE_ENV]
+	const cwd = process.cwd()
+	return resolveProfilesSearchPathsInternal(overridePath, cwd)
 }
 
 function loadProfilesFromDisk(): unknown {

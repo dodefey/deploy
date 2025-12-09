@@ -33,7 +33,7 @@ npx @dodefey/deploy --help
 
 ## Configuration (profiles.json)
 
-Profiles live in your project root (`./profiles.json`). The CLI looks in the current working directory first, or you can point to another file via the `DEPLOY_PROFILES_PATH` environment variable. Each profile sets connection and PM2 details.
+Profiles live in your project root (`./profiles.json`). The CLI looks in the current working directory first; you can point to another file via the `DEPLOY_PROFILES_PATH` environment variable. Each profile sets connection and PM2 details.
 
 ```json
 [

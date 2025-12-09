@@ -102,7 +102,7 @@ export function resolveProfile(name: TProfileName): TResolvedConfig
 
 ### 5.1 Profile storage
 
-- Profiles are loaded **at runtime** from `profiles.json` located in the current working directory (i.e., the project root where the CLI is invoked). Callers may override the path with `DEPLOY_PROFILES_PATH`. If neither is found, the module falls back to the package-local `profiles.json`. The parsed array is cached after the first successful read.
+- Profiles are loaded **at runtime** from `profiles.json` located in the current working directory (i.e., the project root where the CLI is invoked). Callers may override the path with `DEPLOY_PROFILES_PATH`. The parsed array is cached after the first successful read.
 - File I/O errors, JSON parse failures, non-array content, or an empty array all map to `CONFIG_PROFILE_FILE_NOT_FOUND` with the message `"profiles.json is missing, invalid, or empty; expected at least one deploy profile"`.
 
 Example:
@@ -128,7 +128,7 @@ const PROFILES: TProfile[] = [
 
 ### 5.2 listProfiles logic
 
-- Profiles are loaded from `profiles.json` at runtime (working directory → `DEPLOY_PROFILES_PATH` override → package fallback). If every candidate file is missing, invalid (not an array), or empty, the module throws `CONFIG_PROFILE_FILE_NOT_FOUND` with the message `"profiles.json is missing, invalid, or empty; expected at least one deploy profile"`.
+- Profiles are loaded from `profiles.json` at runtime (working directory first, or `DEPLOY_PROFILES_PATH` if provided). If every candidate file is missing, invalid (not an array), or empty, the module throws `CONFIG_PROFILE_FILE_NOT_FOUND` with the message `"profiles.json is missing, invalid, or empty; expected at least one deploy profile"`.
 - After validation, `listProfiles()` returns the profile names.
 
 ### 5.3 resolveProfile logic
