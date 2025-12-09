@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-const modulePromise = import("./../src/churn") as Promise<
-	typeof import("./../src/churn")
+const modulePromise = import("../src/churn") as Promise<
+	typeof import("../src/churn")
 >
 
 describe("parseManifest", () => {

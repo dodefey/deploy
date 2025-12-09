@@ -8,7 +8,7 @@ import {
 	listProfiles,
 	resolveProfile,
 	type TProfile,
-} from "./../src/config"
+} from "../src/config"
 
 function expectCause(fn: () => unknown, cause: string) {
 	let caught: any

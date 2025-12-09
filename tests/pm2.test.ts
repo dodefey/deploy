@@ -63,7 +63,7 @@ async function importModuleWithMocks(
 		},
 	}))
 
-	const { updatePM2App } = await import("./../src/pm2")
+	const { updatePM2App } = await import("../src/pm2")
 	return { updatePM2App, calls }
 }
 
@@ -492,7 +492,7 @@ describe("updatePm2App", () => {
 			},
 		}))
 
-		const { updatePM2App } = await import("./../src/pm2")
+		const { updatePM2App } = await import("../src/pm2")
 		await expect(
 			updatePM2App({
 				sshConnectionString: "host",

@@ -263,7 +263,7 @@ describe("spawn injection", () => {
 		const child = createAdvancedMockChildProcess()
 		const spawnMock = vi.fn().mockReturnValue(child)
 		vi.doMock("node:child_process", () => ({ spawn: spawnMock }))
-		const { runBuild: runBuildWithMock } = await import("./../src/build")
+		const { runBuild: runBuildWithMock } = await import("../src/build")
 
 		const promise = runBuildWithMock({ command: "npx", args: ["build"] })
 		child.triggerClose(0, null)

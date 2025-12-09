@@ -10,7 +10,7 @@ vi.mock("child_process", () => ({
 	spawn: spawnMock,
 }))
 
-import { runTests } from "./../src/test"
+import { runTests } from "../src/test"
 
 class FakeChildProcess extends EventEmitter {
 	stdout?: PassThrough

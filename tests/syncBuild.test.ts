@@ -69,7 +69,7 @@ async function importModuleWithMocks(
 		},
 	}))
 
-	const { syncBuild } = await import("./../src/syncBuild")
+	const { syncBuild } = await import("../src/syncBuild")
 	return { syncBuild, calls, statMock }
 }
 

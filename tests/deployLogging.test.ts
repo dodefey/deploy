@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { TChurnMetrics } from "./../src/churn"
-import * as churnFormatModule from "./../src/churnFormat"
-import type { TLoggerSink } from "./../src/deployLogging"
+import type { TChurnMetrics } from "../src/churn"
+import * as churnFormatModule from "../src/churnFormat"
+import type { TLoggerSink } from "../src/deployLogging"
 import {
 	extractErrorCode,
 	formatFatalError,
@@ -20,7 +20,7 @@ import {
 	logUnexpectedError,
 	setLoggerSink,
 	toErrorMessage,
-} from "./../src/deployLogging"
+} from "../src/deployLogging"
 
 describe("deployLogging utilities", () => {
 	describe("extractErrorCode", () => {

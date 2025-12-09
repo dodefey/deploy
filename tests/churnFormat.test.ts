@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import type { TChurnMetrics } from "./../src/churn"
+import type { TChurnMetrics } from "../src/churn"
 import {
 	buildHeader,
 	formatBytes,
 	formatChurnMetrics,
 	formatPercent,
-} from "./../src/churnFormat"
+} from "../src/churnFormat"
 
 const baseMetrics: TChurnMetrics = {
 	// Files
