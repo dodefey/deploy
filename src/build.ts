@@ -1,13 +1,16 @@
-// See build-module-spec.ts for complete specification of this module.
+// See docs/specs/build-module-spec.md for the complete specification of this module.
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import * as path from "node:path"
 
 export type TBuildOutputMode = "inherit" | "silent" | "callbacks"
 
+export interface TBuildCommand {
+	command: string
+	args: string[]
+}
+
 export interface TBuildOptions {
 	rootDir?: string
-	nuxtBin?: string
-	nuxtArgs?: string[]
 	env?: Record<string, string>
 	outputMode?: TBuildOutputMode
 	onStdoutLine?: (line: string) => void
@@ -28,25 +31,31 @@ type TSpawnLike = (
 // Internal test-only option to override spawn; not part of the public API surface.
 type TBuildOptionsWithSpawn = TBuildOptions & { spawnImpl?: TSpawnLike }
 
-export async function runNuxtBuild(options: TBuildOptions = {}): Promise<void> {
+export async function runBuild(
+	commandSpec: TBuildCommand,
+	options: TBuildOptions = {},
+): Promise<void> {
+	const optionsWithSpawn = options as TBuildOptionsWithSpawn
 	const {
 		rootDir = process.cwd(),
-		nuxtBin = "npx",
-		nuxtArgs = ["nuxt", "build", "--dotenv", ".env.production"],
 		env = {},
 		outputMode = "inherit",
 		onStdoutLine,
 		onStderrLine,
-	} = options
+	} = optionsWithSpawn
 
 	const cwd = path.resolve(rootDir)
 	const spawnEnv = { ...process.env, ...env }
 	const stdio = resolveStdio(outputMode)
-	const child = createSpawn(options)(nuxtBin, nuxtArgs, {
-		cwd,
-		env: spawnEnv,
-		stdio,
-	})
+	const child = createSpawn(optionsWithSpawn)(
+		commandSpec.command,
+		commandSpec.args,
+		{
+			cwd,
+			env: spawnEnv,
+			stdio,
+		},
+	)
 
 	wireOutput(child, outputMode, { onStdoutLine, onStderrLine })
 
@@ -56,7 +65,7 @@ export async function runNuxtBuild(options: TBuildOptions = {}): Promise<void> {
 				reject(
 					buildError(
 						"BUILD_COMMAND_NOT_FOUND",
-						`Build command not found: ${nuxtBin}`,
+						`Build command not found: ${commandSpec.command}`,
 					),
 				)
 				return
@@ -146,8 +155,8 @@ function flushLines(buffer: string, cb?: (line: string) => void): string {
 	return incomplete
 }
 
-function createSpawn(options: TBuildOptions): TSpawnLike {
-	const custom = (options as TBuildOptionsWithSpawn).spawnImpl
+function createSpawn(options: TBuildOptionsWithSpawn): TSpawnLike {
+	const custom = options.spawnImpl
 	return custom ?? spawn
 }
 

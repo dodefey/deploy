@@ -72,6 +72,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 			{
 				name: "prod",
@@ -79,6 +81,8 @@ describe("config module", () => {
 				remoteDir: "/r2",
 				env: "e2",
 				pm2AppName: "app2",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		__setProfilesForTest(profiles)
@@ -93,6 +97,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		__setProfilesForTest(profiles)
@@ -107,12 +113,16 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		__setProfilesForTest(profiles)
 		const resolved = resolveProfile("prod")
 		expect(resolved.buildDir).toBe(".output")
 		expect(resolved.pm2RestartMode).toBe("startOrReload")
+		expect(resolved.buildCommand).toBe("npx")
+		expect(resolved.buildArgs).toEqual(["nuxt", "build"])
 	})
 
 	it("validates all required fields for a matching profile", () => {
@@ -124,6 +134,8 @@ describe("config module", () => {
 				remoteDir: "  /var/www/test  ",
 				env: "  production  ",
 				pm2AppName: "  TestApp  ",
+				buildCommand: "  npx  ",
+				buildArgs: ["  nuxt  ", " build "],
 			},
 		])
 
@@ -135,6 +147,8 @@ describe("config module", () => {
 		expect(resolved.remoteDir).toBe("/var/www/test")
 		expect(resolved.env).toBe("production")
 		expect(resolved.pm2AppName).toBe("TestApp")
+		expect(resolved.buildCommand).toBe("npx")
+		expect(resolved.buildArgs).toEqual(["nuxt", "build"])
 	})
 
 	it("validates required fields (empty -> missing)", () => {
@@ -145,6 +159,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		__setProfilesForTest(profiles)
@@ -159,6 +175,8 @@ describe("config module", () => {
 				remoteDir: "/var/www/test",
 				env: "production",
 				pm2AppName: "TestApp",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			} as unknown as TProfile,
 		])
 
@@ -173,6 +191,8 @@ describe("config module", () => {
 				remoteDir: "   ",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		__setProfilesForTest(profiles)
@@ -187,6 +207,8 @@ describe("config module", () => {
 				sshConnectionString: "testuser@testhost.example.com",
 				env: "production",
 				pm2AppName: "TestApp",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			} as unknown as TProfile,
 		])
 
@@ -201,6 +223,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "   ",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		__setProfilesForTest(profiles)
@@ -215,10 +239,44 @@ describe("config module", () => {
 				sshConnectionString: "testuser@testhost.example.com",
 				remoteDir: "/var/www/test",
 				pm2AppName: "TestApp",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			} as unknown as TProfile,
 		])
 
 		expectCause(() => resolveProfile("bad"), "CONFIG_PROFILE_INVALID")
+	})
+
+	it("throws CONFIG_PROFILE_INVALID when buildCommand is missing or empty", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "   ",
+				buildArgs: ["nuxt", "build"],
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
+	})
+
+	it("throws CONFIG_PROFILE_INVALID when buildArgs are missing or empty", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: [],
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
 	})
 
 	it("validates required pm2AppName", () => {
@@ -229,6 +287,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "   ",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		__setProfilesForTest(profiles)
@@ -243,6 +303,8 @@ describe("config module", () => {
 				sshConnectionString: "testuser@testhost.example.com",
 				remoteDir: "/var/www/test",
 				env: "production",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			} as unknown as TProfile,
 		])
 
@@ -258,6 +320,8 @@ describe("config module", () => {
 				env: "e",
 				pm2AppName: "app",
 				buildDir: "   ",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		__setProfilesForTest(profiles)
@@ -273,6 +337,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 				// @ts-expect-error intentionally supplying padded value to verify trimming
 				pm2RestartMode: " reboot ",
 			},
@@ -290,6 +356,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 				// @ts-expect-error intentionally supplying padded value to verify defaulting
 				pm2RestartMode: "   ",
 			},
@@ -307,6 +375,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 				// @ts-expect-error intentionally invalid restart mode to assert error mapping
 				pm2RestartMode: "invalid",
 			},
@@ -324,6 +394,8 @@ describe("config module", () => {
 				env: " production ",
 				pm2AppName: " TestApp ",
 				buildDir: "  .output/custom  ",
+				buildCommand: " npx ",
+				buildArgs: [" nuxt ", " build "],
 				// @ts-expect-error padded value to verify trimming/defaulting in resolved config
 				pm2RestartMode: " startOrReload ",
 			},
@@ -335,6 +407,8 @@ describe("config module", () => {
 		expect(resolved.env).toBe("production")
 		expect(resolved.pm2AppName).toBe("TestApp")
 		expect(resolved.buildDir).toBe(".output/custom")
+		expect(resolved.buildCommand).toBe("npx")
+		expect(resolved.buildArgs).toEqual(["nuxt", "build"])
 		expect(resolved.pm2RestartMode).toBe("startOrReload")
 	})
 
@@ -346,6 +420,8 @@ describe("config module", () => {
 				remoteDir: "/r",
 				env: "e",
 				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 			{
 				name: "dup",
@@ -353,6 +429,8 @@ describe("config module", () => {
 				remoteDir: "/r2",
 				env: "e2",
 				pm2AppName: "app2",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 			},
 		]
 		expectCause(

@@ -2,7 +2,7 @@ import type { SpawnOptions } from "node:child_process"
 import { resolve } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { runNuxtBuild } from "../src/build"
+import { runBuild } from "../src/build"
 import {
 	createAdvancedMockChildProcess,
 	type IAdvancedMockChildProcess,
@@ -14,9 +14,20 @@ type TSpawnCall = {
 	options: SpawnOptions
 }
 
-type TBuildOptionsWithSpawn = Parameters<typeof runNuxtBuild>[0] & {
-	spawnImpl?: (...args: any[]) => any
+type TSpawnLike = (
+	command: string,
+	args: string[],
+	options: SpawnOptions,
+) => any
+
+type TTestBuildOptions = NonNullable<Parameters<typeof runBuild>[1]> & {
+	spawnImpl: TSpawnLike
 }
+
+const withSpawn = (options: TTestBuildOptions) =>
+	options as Parameters<typeof runBuild>[1]
+
+const commandSpec = { command: "custom", args: ["build"] }
 
 afterEach(() => {
 	vi.restoreAllMocks()
@@ -57,33 +68,31 @@ function makeSpawnMocks() {
 	return { spawnImpl, calls, emitClose, emitError, emitStdout, emitStderr }
 }
 
-describe("runNuxtBuild happy paths", () => {
-	it("resolves on successful close with defaults", async () => {
+describe("runBuild happy paths", () => {
+	it("resolves on successful close", async () => {
 		const { spawnImpl, emitClose } = makeSpawnMocks()
 
-		const promise = runNuxtBuild({ spawnImpl } as TBuildOptionsWithSpawn)
+		const promise = runBuild(commandSpec, withSpawn({ spawnImpl }))
 		emitClose(0, null)
 		await expect(promise).resolves.toBeUndefined()
 	})
 
-	it("wires defaults for command, args, cwd, env, stdio", async () => {
+	it("wires provided command, cwd, env, stdio defaults", async () => {
 		const { spawnImpl, calls, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({
-			spawnImpl,
-			env: { TEST_EXTRA: "1" },
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			{ command: "pnpm", args: ["run", "build"] },
+			withSpawn({
+				spawnImpl,
+				env: { TEST_EXTRA: "1" },
+			}),
+		)
 		emitClose(0, null)
 		await promise
 
 		expect(calls).toHaveLength(1)
 		const call = calls[0]!
-		expect(call.command).toBe("npx")
-		expect(call.args).toEqual([
-			"nuxt",
-			"build",
-			"--dotenv",
-			".env.production",
-		])
+		expect(call.command).toBe("pnpm")
+		expect(call.args).toEqual(["run", "build"])
 		expect(call.options.cwd).toBe(resolve(process.cwd()))
 		expect((call.options.env as Record<string, string>).TEST_EXTRA).toBe(
 			"1",
@@ -92,10 +101,10 @@ describe("runNuxtBuild happy paths", () => {
 	})
 })
 
-describe("runNuxtBuild error mapping", () => {
+describe("runBuild error mapping", () => {
 	it("maps ENOENT to BUILD_COMMAND_NOT_FOUND", async () => {
 		const { spawnImpl, emitError } = makeSpawnMocks()
-		const promise = runNuxtBuild({ spawnImpl } as TBuildOptionsWithSpawn)
+		const promise = runBuild(commandSpec, withSpawn({ spawnImpl }))
 		emitError({ code: "ENOENT" })
 		await expect(promise).rejects.toMatchObject({
 			cause: "BUILD_COMMAND_NOT_FOUND",
@@ -104,21 +113,21 @@ describe("runNuxtBuild error mapping", () => {
 
 	it("maps generic spawn error to BUILD_FAILED", async () => {
 		const { spawnImpl, emitError } = makeSpawnMocks()
-		const promise = runNuxtBuild({ spawnImpl } as TBuildOptionsWithSpawn)
+		const promise = runBuild(commandSpec, withSpawn({ spawnImpl }))
 		emitError(new Error("boom"))
 		await expect(promise).rejects.toMatchObject({ cause: "BUILD_FAILED" })
 	})
 
 	it("maps non-zero exit code to BUILD_FAILED", async () => {
 		const { spawnImpl, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({ spawnImpl } as TBuildOptionsWithSpawn)
+		const promise = runBuild(commandSpec, withSpawn({ spawnImpl }))
 		emitClose(1, null)
 		await expect(promise).rejects.toMatchObject({ cause: "BUILD_FAILED" })
 	})
 
 	it("maps signal to BUILD_INTERRUPTED", async () => {
 		const { spawnImpl, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({ spawnImpl } as TBuildOptionsWithSpawn)
+		const promise = runBuild(commandSpec, withSpawn({ spawnImpl }))
 		emitClose(null, "SIGINT")
 		await expect(promise).rejects.toMatchObject({
 			cause: "BUILD_INTERRUPTED",
@@ -129,10 +138,13 @@ describe("runNuxtBuild error mapping", () => {
 describe("output mode wiring", () => {
 	it("inherit mode uses stdio inherit", async () => {
 		const { spawnImpl, calls, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({
-			spawnImpl,
-			outputMode: "inherit",
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				outputMode: "inherit",
+			}),
+		)
 		emitClose(0, null)
 		await promise
 		expect(calls[0]!.options.stdio).toBe("inherit")
@@ -140,10 +152,13 @@ describe("output mode wiring", () => {
 
 	it("silent mode ignores stdio", async () => {
 		const { spawnImpl, calls, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({
-			spawnImpl,
-			outputMode: "silent",
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				outputMode: "silent",
+			}),
+		)
 		emitClose(0, null)
 		await promise
 		expect(calls[0]!.options.stdio).toEqual(["ignore", "ignore", "ignore"])
@@ -151,10 +166,13 @@ describe("output mode wiring", () => {
 
 	it("callbacks mode pipes stdio", async () => {
 		const { spawnImpl, calls, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({
-			spawnImpl,
-			outputMode: "callbacks",
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				outputMode: "callbacks",
+			}),
+		)
 		emitClose(0, null)
 		await promise
 		expect(calls[0]!.options.stdio).toEqual(["ignore", "pipe", "pipe"])
@@ -163,11 +181,14 @@ describe("output mode wiring", () => {
 	it("splits stdout lines and flushes trailing partial", async () => {
 		const { spawnImpl, emitStdout, emitClose } = makeSpawnMocks()
 		const lines: string[] = []
-		const promise = runNuxtBuild({
-			spawnImpl,
-			outputMode: "callbacks",
-			onStdoutLine: (line) => lines.push(line),
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				outputMode: "callbacks",
+				onStdoutLine: (line: string) => lines.push(line),
+			}),
+		)
 		emitStdout("foo\nbar")
 		emitStdout("\nbaz\n")
 		emitStdout("partial")
@@ -179,11 +200,14 @@ describe("output mode wiring", () => {
 	it("splits stderr lines", async () => {
 		const { spawnImpl, emitStderr, emitClose } = makeSpawnMocks()
 		const lines: string[] = []
-		const promise = runNuxtBuild({
-			spawnImpl,
-			outputMode: "callbacks",
-			onStderrLine: (line) => lines.push(line),
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				outputMode: "callbacks",
+				onStderrLine: (line: string) => lines.push(line),
+			}),
+		)
 		emitStderr("oops\nbad")
 		emitClose(0, null)
 		await promise
@@ -194,11 +218,14 @@ describe("output mode wiring", () => {
 describe("missing callback behavior", () => {
 	it("ignores stderr when only stdout callback provided", async () => {
 		const { spawnImpl, emitStderr, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({
-			spawnImpl,
-			outputMode: "callbacks",
-			onStdoutLine: () => {},
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				outputMode: "callbacks",
+				onStdoutLine: () => {},
+			}),
+		)
 		emitStderr("ignore me\n")
 		emitClose(0, null)
 		await expect(promise).resolves.toBeUndefined()
@@ -207,10 +234,13 @@ describe("missing callback behavior", () => {
 	it("handles no callbacks provided", async () => {
 		const { spawnImpl, emitStdout, emitStderr, emitClose } =
 			makeSpawnMocks()
-		const promise = runNuxtBuild({
-			spawnImpl,
-			outputMode: "callbacks",
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				outputMode: "callbacks",
+			}),
+		)
 		emitStdout("foo\n")
 		emitStderr("bar\n")
 		emitClose(0, null)
@@ -221,7 +251,7 @@ describe("missing callback behavior", () => {
 describe("spawn injection", () => {
 	it("uses spawnImpl when provided", async () => {
 		const { spawnImpl, calls, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({ spawnImpl } as TBuildOptionsWithSpawn)
+		const promise = runBuild(commandSpec, withSpawn({ spawnImpl }))
 		emitClose(0, null)
 		await promise
 		expect(spawnImpl).toHaveBeenCalledTimes(1)
@@ -233,10 +263,9 @@ describe("spawn injection", () => {
 		const child = createAdvancedMockChildProcess()
 		const spawnMock = vi.fn().mockReturnValue(child)
 		vi.doMock("node:child_process", () => ({ spawn: spawnMock }))
-		const { runNuxtBuild: runNuxtBuildWithMock } =
-			await import("./../src/build")
+		const { runBuild: runBuildWithMock } = await import("./../src/build")
 
-		const promise = runNuxtBuildWithMock()
+		const promise = runBuildWithMock({ command: "npx", args: ["build"] })
 		child.triggerClose(0, null)
 		await promise
 
@@ -247,30 +276,15 @@ describe("spawn injection", () => {
 describe("option wiring", () => {
 	it("applies rootDir override", async () => {
 		const { spawnImpl, calls, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({
-			spawnImpl,
-			rootDir: "/tmp/project",
-		} as TBuildOptionsWithSpawn)
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				rootDir: "/tmp/project",
+			}),
+		)
 		emitClose(0, null)
 		await promise
 		expect(calls[0]!.options.cwd).toBe(resolve("/tmp/project"))
-	})
-
-	it("applies nuxtBin and nuxtArgs overrides", async () => {
-		const { spawnImpl, calls, emitClose } = makeSpawnMocks()
-		const promise = runNuxtBuild({
-			spawnImpl,
-			nuxtBin: "custom",
-			nuxtArgs: ["nuxt", "build", "--dotenv", ".env.test"],
-		} as TBuildOptionsWithSpawn)
-		emitClose(0, null)
-		await promise
-		expect(calls[0]!.command).toBe("custom")
-		expect(calls[0]!.args).toEqual([
-			"nuxt",
-			"build",
-			"--dotenv",
-			".env.test",
-		])
 	})
 })

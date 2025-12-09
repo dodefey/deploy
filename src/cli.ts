@@ -2,7 +2,7 @@
 
 import { cli, define } from "gunshi"
 import type { TBuildOutputMode } from "./build.js"
-import { runNuxtBuild } from "./build.js"
+import { runBuild } from "./build.js"
 import type { TChurnOptions } from "./churn.js"
 import { computeClientChurn } from "./churn.js"
 import type { TConfigErrorCode, TResolvedConfig } from "./config.js"
@@ -37,6 +37,8 @@ interface TDeployArgs {
 	sshConnectionString: string
 	remoteDir: string
 	buildDir: string
+	buildCommand: string
+	buildArgs: string[]
 	env: string
 	pm2AppName: string
 	pm2RestartMode: "startOrReload" | "reboot"
@@ -51,13 +53,13 @@ interface TDeployArgs {
 const deployCommand = define({
 	name: "deploy",
 	description:
-		"Deploy the Nuxt build, sync output to the server, update PM2, and compute churn",
+		"Deploy the build, sync output to the server, update PM2, and compute churn",
 	args: {
 		profile: {
 			type: "string",
 			short: "p",
 			description:
-				"Deploy profile name (from config.ts). Required; no default profile is applied",
+				"Deploy profile name (from profiles.json). Required; no default profile is applied",
 			default: undefined,
 		},
 		sshConnectionString: {
@@ -78,7 +80,7 @@ const deployCommand = define({
 			type: "string",
 			short: "b",
 			description:
-				"Override local build output directory (where Nuxt build artifacts live)",
+				"Override local build output directory (where build artifacts live)",
 			default: undefined,
 		},
 		env: {
@@ -110,21 +112,21 @@ const deployCommand = define({
 			type: "boolean",
 			short: "n",
 			description:
-				"Perform a dry run (build and compute churn, but no remote changes or PM2 updates)",
+				"Perform a dry run (build and compute churn, rsync in --dry-run mode, no remote writes or PM2 updates)",
 			default: false,
 		},
 		skipBuild: {
 			type: "boolean",
 			short: "k",
 			description:
-				"Skip Nuxt build; reuse the existing build in buildDir",
+				"Skip build; reuse the existing build in buildDir",
 			default: false,
 		},
 		verbose: {
 			type: "boolean",
 			short: "V",
 			description:
-				"Verbose output; show full Nuxt, rsync, and PM2 logs (matches -V)",
+				"Verbose output; show full build, rsync, and PM2 logs (matches -V)",
 			default: false,
 		},
 		churnOnly: {
@@ -165,6 +167,7 @@ const deployCommand = define({
 			lastProfileUsed = deploy.profileName
 		} catch (err) {
 			handleFatalError("Configuration", err, values.profile)
+			return
 		}
 
 		if (deploy.churnOnly) {
@@ -186,18 +189,25 @@ const deployCommand = define({
 })
 
 async function runBuildPhase(values: TDeployArgs): Promise<void> {
-	logPhaseStart("Running Nuxt build")
+	logPhaseStart("Running build")
 	if (values.skipBuild) {
-		logPhaseSuccess("Nuxt build skipped (per --skipBuild / -k).")
+		logPhaseSuccess("Build skipped (per --skipBuild / -k).")
 		return
 	}
 	try {
-		await runNuxtBuild({
-			outputMode: values.verbose ? "inherit" : "callbacks",
-			onStdoutLine: values.verbose ? undefined : noop,
-			onStderrLine: values.verbose ? undefined : noop,
-		})
-		logPhaseSuccess("Nuxt build completed successfully.")
+		await runBuild(
+			{
+				command: values.buildCommand,
+				args: values.buildArgs,
+			},
+			{
+				rootDir: process.cwd(),
+				outputMode: values.verbose ? "inherit" : "callbacks",
+				onStdoutLine: values.verbose ? undefined : noop,
+				onStderrLine: values.verbose ? undefined : noop,
+			},
+		)
+		logPhaseSuccess("Build completed successfully.")
 	} catch (err) {
 		handleFatalError("Build", err, values.profileName)
 	}
@@ -395,6 +405,8 @@ function applyOverrides(
 		env: overrides.env?.trim() || config.env,
 		pm2AppName: overrides.pm2AppName?.trim() || config.pm2AppName,
 		pm2RestartMode: validatedRestartMode || config.pm2RestartMode,
+		buildCommand: config.buildCommand,
+		buildArgs: config.buildArgs,
 	}
 }
 
@@ -412,6 +424,8 @@ function buildDeployArgs(
 		sshConnectionString: merged.sshConnectionString,
 		remoteDir: merged.remoteDir,
 		buildDir: merged.buildDir,
+		buildCommand: merged.buildCommand,
+		buildArgs: merged.buildArgs,
 		env: merged.env,
 		pm2AppName: merged.pm2AppName,
 		pm2RestartMode: merged.pm2RestartMode,

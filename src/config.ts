@@ -10,6 +10,8 @@ export interface TProfile {
 	pm2AppName: string
 	buildDir?: string
 	pm2RestartMode?: "startOrReload" | "reboot"
+	buildCommand?: string
+	buildArgs?: string[]
 }
 
 export type TProfileName = TProfile["name"]
@@ -22,6 +24,8 @@ export interface TResolvedConfig {
 	env: string
 	pm2AppName: string
 	pm2RestartMode: "startOrReload" | "reboot"
+	buildCommand: string
+	buildArgs: string[]
 }
 
 export type TConfigErrorCode =
@@ -74,6 +78,12 @@ export function resolveProfile(name: TProfileName): TResolvedConfig {
 	const buildDir = normalizeOptionalString(profile.buildDir) ?? ".output"
 	const pm2RestartMode =
 		validateRestartMode(profile.pm2RestartMode) ?? "startOrReload"
+	const buildCommand = requireString(
+		profile.buildCommand,
+		"CONFIG_PROFILE_INVALID",
+		"buildCommand",
+	)
+	const buildArgs = validateBuildArgs(profile.buildArgs)
 
 	return {
 		name: profile.name,
@@ -83,6 +93,8 @@ export function resolveProfile(name: TProfileName): TResolvedConfig {
 		env,
 		pm2AppName,
 		pm2RestartMode,
+		buildCommand,
+		buildArgs,
 	}
 }
 
@@ -156,6 +168,36 @@ function validateRequiredProfileFields(
 	}
 
 	return result
+}
+
+function validateBuildArgs(value: unknown): string[] {
+	if (!Array.isArray(value) || value.length === 0) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"Missing required field: buildArgs",
+		)
+	}
+
+	const normalized: string[] = []
+	for (let i = 0; i < value.length; i += 1) {
+		const arg = value[i] as unknown
+		if (typeof arg !== "string") {
+			throw configError(
+				"CONFIG_PROFILE_INVALID",
+				`buildArgs[${String(i)}] must be a non-empty string`,
+			)
+		}
+		const trimmed = arg.trim()
+		if (trimmed.length === 0) {
+			throw configError(
+				"CONFIG_PROFILE_INVALID",
+				"buildArgs must not contain empty values",
+			)
+		}
+		normalized.push(trimmed)
+	}
+
+	return normalized
 }
 
 /** @internal test-only */

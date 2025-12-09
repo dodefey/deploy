@@ -1,13 +1,13 @@
-# Project: Orchestrator cleanup for `main.ts` (make it a thin conductor)
+# Project: Orchestrator spec for `src/cli.ts` (thin conductor)
 
 ## High-level goal
 
-Refactor `bin/cli/deploy/main.ts` so that:
+Keep `src/cli.ts` a **high-level deploy story** so that:
 
-- It reads as a **high-level deploy story** (build → sync → pm2 → churn).
+- It reads as a **high-level deploy story** (tests → build → sync → pm2 → churn).
 - All detailed work is delegated to:
     - existing modules (`build`, `syncBuild`, `pm2`, `churn`)
-    - a few small, well-named helpers in `main.ts`.
+	- a few small, well-named helpers in `src/cli.ts`.
 - Error handling is **centralized and consistent**.
 - There are **no behavioral changes** to deploy logic (same flags, same semantics, same exit behavior), only code organization and clarity improvements.
 
@@ -15,19 +15,22 @@ Refactor `bin/cli/deploy/main.ts` so that:
 
 ## 1. Introduce a single deploy context type
 
-### 1.1 Define `TDeployArgs` in `main.ts`
+### 1.1 Define `TDeployArgs` in `src/cli.ts`
 
-Add a top-level interface in `main.ts`:
+Add a top-level interface in `src/cli.ts`:
 
 ```ts
 interface TDeployArgs {
 	sshConnectionString: string
 	remoteDir: string
 	buildDir: string
+	buildCommand: string
+	buildArgs: string[]
 	env: string
 	pm2AppName: string
 	pm2RestartMode: "startOrReload" | "reboot"
 	dryRun: boolean
+	skipTests: boolean
 	skipBuild: boolean
 	verbose: boolean
 	churnOnly: boolean
@@ -38,7 +41,7 @@ interface TDeployArgs {
 This type represents the **resolved, fully-validated deploy configuration for a single run**, including:
 
 - Environment / profile info (sshConnectionString, remoteDir, env, pm2AppName, pm2RestartMode, profileName)
-- Runtime flags (dryRun, skipBuild, verbose, churnOnly)
+- Runtime flags (dryRun, skipTests, skipBuild, verbose, churnOnly)
 - Local build dir (buildDir)
 
 ### 1.2 Build exactly one `TDeployArgs` in `run()`
@@ -60,6 +63,7 @@ const deploy: TDeployArgs = {
 	pm2AppName: merged.pm2AppName,
 	pm2RestartMode: merged.pm2RestartMode,
 	dryRun: values.dryRun,
+	skipTests: values.skipTests,
 	skipBuild: values.skipBuild,
 	verbose: values.verbose,
 	churnOnly: values.churnOnly,
@@ -67,7 +71,7 @@ const deploy: TDeployArgs = {
 }
 ```
 
-Use this `deploy` object for all subsequent calls in `main.ts`.
+Use this `deploy` object for all subsequent calls in `src/cli.ts`.
 
 ---
 
@@ -75,28 +79,15 @@ Use this `deploy` object for all subsequent calls in `main.ts`.
 
 ### 2.1 Refactor helper signatures to use `TDeployArgs`
 
-Update existing helpers so they take `TDeployArgs` instead of ad-hoc shapes:
-
-```ts
-async function runSyncBuild(values: TDeployArgs) { ... }
-async function handlePm2(values: TDeployArgs) { ... }
-async function handleChurn(values: TDeployArgs) { ... }
-```
-
-Inside each helper, **destructure only what is needed**:
-
-```ts
-const { sshConnectionString, remoteDir, buildDir, dryRun, verbose } = values
-```
-
-Do **not** change how they call the underlying modules (`syncBuild`, `updatePM2App`, `computeClientChurn`) other than mapping from `TDeployArgs` fields.
+Helpers should accept `TDeployArgs` instead of ad-hoc shapes (e.g. `runTestPhase`, `runBuildPhase`, `runSyncPhase`, `runPm2Phase`, `runChurnPhase`, `runChurnOnlyMode`). Inside each helper, destructure only what is needed and keep the module calls (`runTests`, `runBuild`, `syncBuild`, `updatePM2App`, `computeClientChurn`) unchanged aside from mapping fields.
 
 ### 2.2 Add explicit phase helpers
 
-Add the following helpers in `main.ts`:
+Ensure the following helpers exist in `src/cli.ts`:
 
 ```ts
 async function runBuildPhase(values: TDeployArgs): Promise<void> { ... }
+async function runTestPhase(values: TDeployArgs): Promise<void> { ... }
 async function runSyncPhase(values: TDeployArgs): Promise<void> { ... }
 async function runPm2Phase(values: TDeployArgs): Promise<void> { ... }
 async function runChurnPhase(values: TDeployArgs): Promise<void> { ... }
@@ -105,9 +96,14 @@ async function runChurnOnlyMode(values: TDeployArgs): Promise<void> { ... }
 
 **Behavior:**
 
+- `runTestPhase`
+	- If `values.skipTests` is true, log the skip message and return.
+	- Otherwise, call the test module (`runTests`) with the existing outputMode wiring.
+	- On error, treat as fatal.
+
 - `runBuildPhase`
-    - If `values.skipBuild` is true, log the same “Skipping build” message as today and return.
-    - Otherwise, call the existing build module wrapper (`runNuxtBuild`) with the same options as before.
+	- If `values.skipBuild` is true, log the same “Skipping build” message as today and return.
+	- Otherwise, call the build module (`runBuild`) with the profile-provided `buildCommand`/`buildArgs` and the same outputMode wiring as before.
     - On error, delegate to the new fatal error helper (see section 3).
 
 - `runSyncPhase`
@@ -146,6 +142,7 @@ if (deploy.churnOnly) {
     return
 }
 
+await runTestPhase(deploy)
 await runBuildPhase(deploy)
 await runSyncPhase(deploy)
 await runPm2Phase(deploy)
@@ -160,7 +157,7 @@ Keep any start/end summary logs you already have, but ensure the **main narrativ
 
 ### 3.1 Add two error helpers
 
-In `main.ts`, add:
+In `src/cli.ts`, add:
 
 ```ts
 function handleFatalError(label: string, err: unknown): never {
@@ -228,6 +225,7 @@ try {
 - **Fatal phases:**
     - Config resolution
     - Overrides
+	- Tests
     - Build
     - Sync
     - Churn in `--churnOnly` mode  

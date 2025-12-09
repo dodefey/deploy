@@ -4,7 +4,7 @@ type MockConfig = {
 	listProfilesReturn?: string[]
 	resolveProfileImpl?: () => any
 	updatePm2AppImpl?: () => any
-	runNuxtBuildImpl?: () => any
+	runBuildImpl?: () => any
 	runTestsImpl?: () => any
 	syncBuildImpl?: () => any
 	computeClientChurnImpl?: () => any
@@ -47,10 +47,10 @@ function setupMocks(config: MockConfig = {}) {
 		resolveProfile,
 	}))
 	vi.doMock("./../src/build.ts", () => ({
-		runNuxtBuild: vi
+		runBuild: vi
 			.fn()
 			.mockImplementation(
-				config.runNuxtBuildImpl ?? (() => Promise.resolve()),
+				config.runBuildImpl ?? (() => Promise.resolve()),
 			),
 	}))
 	vi.doMock("./../src/test.ts", () => ({
@@ -94,7 +94,7 @@ async function importMain() {
 	return await import("../src/cli")
 }
 
-describe("main.ts wiring", () => {
+describe("src/cli.ts wiring", () => {
 	beforeEach(() => {
 		vi.resetModules()
 	})
@@ -127,6 +127,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload" as const,
@@ -174,6 +176,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload" as const,
@@ -194,6 +198,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload" as const,
@@ -205,13 +211,14 @@ describe("main.ts wiring", () => {
 			env: " e2 ",
 			pm2AppName: " app2 ",
 			pm2RestartMode: "reboot",
-			skipTests: false,
 		}
 		const merged = __test__.applyOverrides(cfg, overrides)
 		expect(merged).toMatchObject({
 			sshConnectionString: "s2",
 			remoteDir: "/r2",
 			buildDir: "/b2",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "e2",
 			pm2AppName: "app2",
 			pm2RestartMode: "reboot",
@@ -226,6 +233,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload" as const,
@@ -241,6 +250,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -257,7 +268,17 @@ describe("main.ts wiring", () => {
 			cause: "PM2_APP_NAME_NOT_FOUND",
 		})
 		const { logFns } = setupMocks({
-			resolveProfileImpl: () => ({}),
+			resolveProfileImpl: () => ({
+				name: "p",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload" as const,
+			}),
 			updatePm2AppImpl: () => Promise.reject(fatalError),
 		})
 		const { __test__ } = await importMain()
@@ -270,6 +291,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -294,7 +317,17 @@ describe("main.ts wiring", () => {
 			cause: "PM2_HEALTHCHECK_FAILED",
 		})
 		const { logFns } = setupMocks({
-			resolveProfileImpl: () => ({}),
+			resolveProfileImpl: () => ({
+				name: "p",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload" as const,
+			}),
 			updatePm2AppImpl: () => Promise.reject(err),
 		})
 		const { __test__ } = await importMain()
@@ -307,6 +340,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -340,6 +375,8 @@ describe("main.ts wiring", () => {
 				sshConnectionString: "s",
 				remoteDir: "/r",
 				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 				env: "prod",
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
@@ -380,12 +417,14 @@ describe("main.ts wiring", () => {
 				sshConnectionString: "s",
 				remoteDir: "/r",
 				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 				env: "prod",
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
 			}),
 			computeClientChurnImpl: computeMock,
-			runNuxtBuildImpl: runBuildMock,
+			runBuildImpl: runBuildMock,
 			syncBuildImpl: syncMock,
 			updatePm2AppImpl: pm2Mock,
 		})
@@ -422,6 +461,8 @@ describe("main.ts wiring", () => {
 				sshConnectionString: "s",
 				remoteDir: "/r",
 				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
 				env: "prod",
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
@@ -430,7 +471,7 @@ describe("main.ts wiring", () => {
 				phaseOrder.push("tests")
 				return Promise.resolve()
 			},
-			runNuxtBuildImpl: () => {
+			runBuildImpl: () => {
 				phaseOrder.push("build")
 				return Promise.resolve()
 			},
@@ -473,6 +514,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -505,6 +548,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -522,9 +567,9 @@ describe("main.ts wiring", () => {
 		expect(exitSpy).toHaveBeenCalledWith(1)
 	})
 
-	it("runBuildPhase skips Nuxt build when skipBuild is true", async () => {
+	it("runBuildPhase skips build when skipBuild is true", async () => {
 		const { logFns } = setupMocks({
-			runNuxtBuildImpl: () => {
+			runBuildImpl: () => {
 				throw new Error("should not run")
 			},
 		})
@@ -534,6 +579,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -545,9 +592,39 @@ describe("main.ts wiring", () => {
 			profileName: "p",
 		})
 
-		expect(logFns.logPhaseStart).toHaveBeenCalledWith("Running Nuxt build")
+		expect(logFns.logPhaseStart).toHaveBeenCalledWith("Running build")
 		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
-			"Nuxt build skipped (per --skipBuild / -k).",
+			"Build skipped (per --skipBuild / -k).",
+		)
+	})
+
+	it("runBuildPhase passes profile-defined command and args to runBuild", async () => {
+		const runBuildMock = vi.fn().mockResolvedValue(undefined)
+		setupMocks({
+			runBuildImpl: runBuildMock,
+		})
+		const { __test__ } = await importMain()
+
+		await __test__.runBuildPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "custom-cmd",
+			buildArgs: ["arg1", "arg2"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			profileName: "p",
+		})
+
+		expect(runBuildMock).toHaveBeenCalledWith(
+			{ command: "custom-cmd", args: ["arg1", "arg2"] },
+			expect.objectContaining({ outputMode: "callbacks" }),
 		)
 	})
 
@@ -562,6 +639,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -589,6 +668,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -620,6 +701,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",
@@ -654,6 +737,8 @@ describe("main.ts wiring", () => {
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload",

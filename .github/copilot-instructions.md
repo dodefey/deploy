@@ -5,11 +5,11 @@ Goal: a gunshi-based CLI that deploys Nuxt apps via a fixed pipeline (tests → 
 Key entrypoints
 
 - `src/cli.ts`: defines `deploy` command and orchestrates phases; respects flags (--profile required; overrides for ssh/dirs/env/app/restartMode; toggles skipTests/skipBuild/dryRun/verbose/churnOnly). Fatal phases: config, tests, build, sync, churn-only. PM2 and churn during full deploy are non-fatal (log only).
-- Profiles: `profiles.json` in CWD or `DEPLOY_PROFILES_PATH`; fields name, sshConnectionString, remoteDir, env, pm2AppName, optional buildDir (default .output), pm2RestartMode (default startOrReload).
+- Profiles: `profiles.json` in CWD or `DEPLOY_PROFILES_PATH`; fields name, sshConnectionString, remoteDir, env, pm2AppName, required buildCommand, required buildArgs, optional buildDir (default .output), pm2RestartMode (default startOrReload).
 
 Modules and contracts
 
-- Build: `src/build.ts` `runNuxtBuild()` spawns `npx nuxt build --dotenv .env.production`; outputMode inherit|silent|callbacks; errors BUILD_COMMAND_NOT_FOUND/BUILD_FAILED/BUILD_INTERRUPTED via Error.cause.
+- Build: `src/build.ts` `runBuild(command, options)` spawns caller-supplied command/args (no defaults in module); outputMode inherit|silent|callbacks; errors BUILD_COMMAND_NOT_FOUND/BUILD_FAILED/BUILD_INTERRUPTED via Error.cause.
 - Tests: `src/test.ts` `runTests()` default `npx vitest run`; same outputMode pattern; errors TEST_COMMAND_NOT_FOUND/TEST_FAILED/TEST_INTERRUPTED.
 - Sync: `src/syncBuild.ts` rsync local `.output` to `${remoteDir}/.output`; validates local dir; dryRun skips remote mkdir and uses rsync --dry-run; errors SYNC_NO_LOCAL_OUTPUT_DIR/SYNC_SSH_FAILED/SYNC_RSYNC_FAILED.
 - PM2: `src/pm2.ts` uploads `ecosystem.config.js` if changed, then startOrReload or reboot (delete+start), verifies via `pm2 jlist` with retries; errors include PM2_SSH_FAILED/PM2_CONFIG_COMPARE_FAILED/PM2_CONFIG_UPLOAD_FAILED/PM2_COMMAND_FAILED/PM2_STATUS_QUERY_FAILED/PM2_HEALTHCHECK_FAILED/PM2_APP_NAME_NOT_FOUND.

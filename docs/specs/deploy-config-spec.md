@@ -14,7 +14,7 @@ The deploy config module is the **single source of truth for environment-level d
 
 It does **not**:
 
-- Decide which profile to use for a given CLI run (that’s `main.ts`).
+- Decide which profile to use for a given CLI run (that’s `src/cli.ts`).
 - Know about runtime flags like `dryRun`, `skipBuild`, `verbose`, `churnOnly`.
 - Read from `.env` or environment variables in this initial version.
 
@@ -50,6 +50,10 @@ export interface TProfile {
 
 	buildDir?: string
 	pm2RestartMode?: "startOrReload" | "reboot"
+
+	// Build command configuration (required; no defaults applied here)
+	buildCommand?: string
+	buildArgs?: string[]
 }
 ```
 
@@ -70,6 +74,8 @@ export interface TResolvedConfig {
 	env: string
 	pm2AppName: string
 	pm2RestartMode: "startOrReload" | "reboot"
+	buildCommand: string
+	buildArgs: string[]
 }
 ```
 
@@ -115,6 +121,8 @@ const PROFILES: TProfile[] = [
 		remoteDir: "/var/www/app",
 		env: "test",
 		pm2AppName: "MyAppTest",
+		buildCommand: "npx",
+		buildArgs: ["nuxt", "build"],
 	},
 	{
 		name: "prod",
@@ -122,6 +130,8 @@ const PROFILES: TProfile[] = [
 		remoteDir: "/var/www/app",
 		env: "production",
 		pm2AppName: "MyApp",
+		buildCommand: "npx",
+		buildArgs: ["nuxt", "build", "--dotenv", ".env.production"],
 	},
 ]
 ```
@@ -137,14 +147,15 @@ Steps:
 
 1. Lookup profile → else throw `CONFIG_PROFILE_NOT_FOUND`
 2. Apply defaults:
-    - `buildDir = profile.buildDir ?? ".output"`
-    - `pm2RestartMode = profile.pm2RestartMode ?? "startOrReload"`
+	- `buildDir = profile.buildDir ?? ".output"`
+	- `pm2RestartMode = profile.pm2RestartMode ?? "startOrReload"`
 3. Validate required fields:
-    - Once a profile name is found, all required fields (`sshConnectionString`, `remoteDir`, `env`, `pm2AppName`) are validated via a central table (`REQUIRED_PROFILE_STRING_FIELDS`).
-    - Required fields must be non-empty strings after trimming; missing/empty values throw `CONFIG_PROFILE_INVALID`.
-    - Profile names must be unique; enforce uniqueness once at module load time and fail fast if duplicates are found.
-    - Optional string fields, if provided, must be non-empty after trimming; otherwise defaults apply.
-4. Return resolved config.
+	- Required strings: `sshConnectionString`, `remoteDir`, `env`, `pm2AppName` → non-empty after trimming, else `CONFIG_PROFILE_INVALID`.
+	- Build command: `buildCommand` must be a non-empty string; missing/whitespace → `CONFIG_PROFILE_INVALID`.
+	- Build args: `buildArgs` must be a non-empty string array; missing/empty/non-string/whitespace entries → `CONFIG_PROFILE_INVALID`.
+	- Profile names must be unique; enforce uniqueness once at load time.
+	- Optional string fields, if provided, must be non-empty after trimming; otherwise defaults apply.
+4. Return resolved config including `buildCommand` and `buildArgs`.
 
 Example return:
 
@@ -157,6 +168,8 @@ return {
 	env: profile.env,
 	pm2AppName: profile.pm2AppName,
 	pm2RestartMode,
+	buildCommand: profile.buildCommand,
+	buildArgs: profile.buildArgs,
 }
 ```
 
@@ -175,17 +188,17 @@ function configError(code: TConfigErrorCode, message: string): Error {
 ### 6.2 Error cases
 
 - profiles.json missing, invalid (not an array), or empty → `CONFIG_PROFILE_FILE_NOT_FOUND` (`profiles.json is missing, invalid, or empty; expected at least one deploy profile`)
-- Requested profile name not found in the validated list → `CONFIG_PROFILE_NOT_FOUND`
 - Duplicate profile names detected at load → `CONFIG_DUPLICATE_PROFILE`
 - Missing/empty required profile fields (sshConnectionString, remoteDir, env, pm2AppName) → `CONFIG_PROFILE_INVALID`
+- Missing/invalid buildCommand or buildArgs → `CONFIG_PROFILE_INVALID`
 - Invalid pm2RestartMode → `CONFIG_INVALID_RESTART_MODE`
 
-## 7. Interaction with main.ts
+## 7. Interaction with src/cli.ts
 
-- main.ts is responsible for selecting profile.
-- main.ts applies CLI overrides.
-- main.ts enforces production-safety rules.
-- If `profiles.json` is missing, invalid, or empty, config throws `CONFIG_PROFILE_FILE_NOT_FOUND`; main.ts treats this as fatal (logged via `logFatalError`, exit code 1).
+- `src/cli.ts` is responsible for selecting profile.
+- `src/cli.ts` applies CLI overrides.
+- `src/cli.ts` enforces production-safety rules.
+- If `profiles.json` is missing, invalid, or empty, config throws `CONFIG_PROFILE_FILE_NOT_FOUND`; `src/cli.ts` treats this as fatal (logged via `logFatalError`, exit code 1).
 
 ## 8. Future Extensions
 
