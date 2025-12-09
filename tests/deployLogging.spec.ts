@@ -168,11 +168,11 @@ describe("deployLogging sink and wiring", () => {
 
 	describe("phase logs", () => {
 		it("logPhaseStart/Success", () => {
-			logPhaseStart("Running Nuxt build")
-			logPhaseSuccess("Nuxt build completed successfully.")
+			logPhaseStart("Running build")
+			logPhaseSuccess("Build completed successfully.")
 			expect(infoLines).toEqual([
-				"[deploy] Running Nuxt build...",
-				"[deploy] Nuxt build completed successfully.",
+				"[deploy] Running build...",
+				"[deploy] Build completed successfully.",
 			])
 			expect(errorLines).toEqual([])
 		})

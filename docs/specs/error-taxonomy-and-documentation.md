@@ -75,8 +75,9 @@ Example:
 
 ```
 Errors:
-- BUILD_NUXT_FAILED
-- BUILD_SPAWN_FAILED
+- BUILD_COMMAND_NOT_FOUND
+- BUILD_FAILED
+- BUILD_INTERRUPTED
 See ERRORS.md for descriptions and deploy impact.
 ```
 

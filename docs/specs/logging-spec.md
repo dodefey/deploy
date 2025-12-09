@@ -52,7 +52,7 @@ onStderrLine: (line) => {} // no-op
 **Behavior:**
 
 - Same phase lines as non-verbose.
-- Full Nuxt / rsync / PM2 output printed.
+- Full build / rsync / PM2 output printed.
 - Modules use:
 
 ```ts
@@ -70,8 +70,8 @@ Every phase logs:
 
 ### 3.1 Build
 
-- `[deploy] Running Nuxt build...`
-- `[deploy] Nuxt build completed successfully.`
+- `[deploy] Running build...`
+- `[deploy] Build completed successfully.`
 
 ### 3.2 Sync
 

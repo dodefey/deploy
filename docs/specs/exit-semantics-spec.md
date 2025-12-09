@@ -40,7 +40,7 @@ This spec assumes the existing phase structure:
 These phases are considered fatal:
 
 - Configuration (profile selection, config resolution, overrides)
-- Build (Nuxt production build)
+- Build (profile-defined build)
 - Sync (client bundle rsync to server)
 - Churn-only (when running `churnOnly` mode)
 

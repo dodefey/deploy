@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-The `syncBuild` module is responsible for **safely and efficiently synchronizing the local Nuxt production build output** to a remote deployment directory.
+The `syncBuild` module is responsible for **safely and efficiently synchronizing the local build output** to a remote deployment directory.
 
 - A single build directory (`.output`) is maintained on the server.
 - Rsync is used as the sole synchronization mechanism.
