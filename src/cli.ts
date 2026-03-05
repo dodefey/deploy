@@ -406,6 +406,7 @@ function applyOverrides(
 		pm2RestartMode: validatedRestartMode || config.pm2RestartMode,
 		buildCommand: config.buildCommand,
 		buildArgs: config.buildArgs,
+		churn: config.churn,
 	}
 }
 

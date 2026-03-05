@@ -1,6 +1,25 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 
+export type TChurnDiagnosticsDefault = "off" | "compact" | "full" | "json"
+
+export interface TChurnGroupRule {
+	pattern: string
+	group: string
+}
+
+export interface TProfileChurnConfig {
+	diagnosticsDefault?: TChurnDiagnosticsDefault
+	topN?: number
+	groupRules?: TChurnGroupRule[]
+}
+
+export interface TResolvedChurnConfig {
+	diagnosticsDefault: TChurnDiagnosticsDefault
+	topN: number
+	groupRules: TChurnGroupRule[]
+}
+
 export interface TProfile {
 	name: string
 	/** SSH target, e.g. "user@host" */
@@ -12,6 +31,7 @@ export interface TProfile {
 	pm2RestartMode?: "startOrReload" | "reboot"
 	buildCommand?: string
 	buildArgs?: string[]
+	churn?: TProfileChurnConfig
 }
 
 export type TProfileName = TProfile["name"]
@@ -26,6 +46,7 @@ export interface TResolvedConfig {
 	pm2RestartMode: "startOrReload" | "reboot"
 	buildCommand: string
 	buildArgs: string[]
+	churn: TResolvedChurnConfig
 }
 
 export type TConfigErrorCode =
@@ -54,6 +75,8 @@ const PROFILES_PATH_OVERRIDE_ENV = "DEPLOY_PROFILES_PATH"
 // Profiles are defined in profiles.json to keep deploy targets out of code.
 const PROFILE_FILE_ERROR_MESSAGE =
 	"profiles.json is missing, invalid, or empty; expected at least one deploy profile"
+const DEFAULT_CHURN_DIAGNOSTICS_MODE: TChurnDiagnosticsDefault = "off"
+const DEFAULT_CHURN_TOP_N = 5
 
 let profilesLoader = loadProfilesFromDisk
 
@@ -84,6 +107,7 @@ export function resolveProfile(name: TProfileName): TResolvedConfig {
 		"buildCommand",
 	)
 	const buildArgs = validateBuildArgs(profile.buildArgs)
+	const churn = validateChurnConfig(profile.churn)
 
 	return {
 		name: profile.name,
@@ -95,6 +119,7 @@ export function resolveProfile(name: TProfileName): TResolvedConfig {
 		pm2RestartMode,
 		buildCommand,
 		buildArgs,
+		churn,
 	}
 }
 
@@ -198,6 +223,118 @@ function validateBuildArgs(value: unknown): string[] {
 	}
 
 	return normalized
+}
+
+function validateChurnConfig(value: unknown): TResolvedChurnConfig {
+	if (value === undefined) {
+		return {
+			diagnosticsDefault: DEFAULT_CHURN_DIAGNOSTICS_MODE,
+			topN: DEFAULT_CHURN_TOP_N,
+			groupRules: [],
+		}
+	}
+
+	if (!isRecord(value)) {
+		throw configError("CONFIG_PROFILE_INVALID", "churn must be an object")
+	}
+
+	const diagnosticsDefault =
+		value.diagnosticsDefault === undefined
+			? DEFAULT_CHURN_DIAGNOSTICS_MODE
+			: validateDiagnosticsDefault(value.diagnosticsDefault)
+
+	const topN =
+		value.topN === undefined
+			? DEFAULT_CHURN_TOP_N
+			: validatePositiveInteger(value.topN, "churn.topN")
+
+	const groupRules =
+		value.groupRules === undefined
+			? []
+			: validateChurnGroupRules(value.groupRules)
+
+	return {
+		diagnosticsDefault,
+		topN,
+		groupRules,
+	}
+}
+
+function validateDiagnosticsDefault(value: unknown): TChurnDiagnosticsDefault {
+	if (typeof value !== "string") {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"churn.diagnosticsDefault must be one of: off, compact, full, json",
+		)
+	}
+	const trimmed = value.trim()
+	if (
+		trimmed === "off" ||
+		trimmed === "compact" ||
+		trimmed === "full" ||
+		trimmed === "json"
+	) {
+		return trimmed
+	}
+	throw configError(
+		"CONFIG_PROFILE_INVALID",
+		`Invalid churn.diagnosticsDefault: ${value}`,
+	)
+}
+
+function validatePositiveInteger(value: unknown, fieldName: string): number {
+	if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`${fieldName} must be a positive integer`,
+		)
+	}
+	return value
+}
+
+function validateChurnGroupRules(value: unknown): TChurnGroupRule[] {
+	if (!Array.isArray(value)) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"churn.groupRules must be an array",
+		)
+	}
+
+	const rules = value as unknown[]
+	const normalized: TChurnGroupRule[] = []
+	for (let i = 0; i < rules.length; i += 1) {
+		const item = rules[i]
+		if (!isRecord(item)) {
+			throw configError(
+				"CONFIG_PROFILE_INVALID",
+				`churn.groupRules[${String(i)}] must be an object`,
+			)
+		}
+
+		const pattern = normalizeConfigString(item.pattern)
+		const group = normalizeConfigString(item.group)
+
+		if (!pattern || !group) {
+			throw configError(
+				"CONFIG_PROFILE_INVALID",
+				`churn.groupRules[${String(i)}] requires non-empty pattern and group`,
+			)
+		}
+
+		normalized.push({ pattern, group })
+	}
+
+	return normalized
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function normalizeConfigString(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined
+	const trimmed = value.trim()
+	return trimmed.length > 0 ? trimmed : undefined
 }
 
 /** @internal test-only */
