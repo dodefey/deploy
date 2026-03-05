@@ -229,7 +229,7 @@ describe("buildChurnReport", () => {
 		expect(report.quality.warnings).toEqual([])
 	})
 
-	it("builds deterministic top offenders and attribution ordering", () => {
+	it("builds deterministic offender ordering without truncating report data", () => {
 		const oldManifest = buildManifest([])
 		const newManifest = buildManifest([
 			{
@@ -291,7 +291,14 @@ describe("buildChurnReport", () => {
 			report.diagnostics?.topOffenders?.newContentByBytes?.map(
 				(offender) => offender.path,
 			),
-		).toEqual(["./a.js", "./z.js", "./mid.js", "./small.css", "./tiny.map"])
+		).toEqual([
+			"./a.js",
+			"./z.js",
+			"./mid.js",
+			"./small.css",
+			"./tiny.map",
+			"./micro.json",
+		])
 
 		expect(report.diagnostics?.attribution?.byOwnerGroup).toEqual([
 			{ key: "beta", files: 3, bytes: 360 },

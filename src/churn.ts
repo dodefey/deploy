@@ -943,7 +943,6 @@ function selectTopOffenders(files: TChurnManifestFile[]) {
 			if (left.size !== right.size) return right.size - left.size
 			return left.path.localeCompare(right.path)
 		})
-		.slice(0, 5)
 		.map((file) => ({
 			path: file.path,
 			bytes: file.size,
