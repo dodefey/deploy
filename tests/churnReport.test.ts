@@ -176,6 +176,31 @@ describe("buildChurnReport", () => {
 			report.diagnostics?.avoidableChurn
 				?.renameNoisePercentOfDownloadBytes,
 		).toBeCloseTo((120 * 100) / (120 + 300), 6)
+		expect(report.diagnostics?.topOffenders?.newContentByBytes).toEqual([
+			{
+				path: "./c.js",
+				bytes: 300,
+				assetType: "js",
+				ownerGroup: "component",
+			},
+		])
+		expect(
+			report.diagnostics?.topOffenders?.renamedSameHashByBytes,
+		).toEqual([
+			{
+				path: "./renamed-b.js",
+				bytes: 120,
+				assetType: "js",
+				ownerGroup: "vendor",
+			},
+		])
+		expect(report.diagnostics?.attribution?.byOwnerGroup).toEqual([
+			{ key: "component", files: 1, bytes: 300 },
+			{ key: "vendor", files: 1, bytes: 120 },
+		])
+		expect(report.diagnostics?.recommendations).toContain(
+			"High rename churn detected. Stabilize chunk and asset naming to improve client cache reuse.",
+		)
 	})
 
 	it("sets baseline.available to false when there is no previous manifest", () => {

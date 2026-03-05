@@ -800,6 +800,12 @@ export function buildChurnReport(
 function buildReportDiagnostics(
 	diff: TManifestDiffResult,
 ): NonNullable<TChurnReportV1["diagnostics"]> {
+	const churnContributors = [
+		...diff.changedSamePath.map((pair) => pair.newFile),
+		...diff.renamedSameHash.map((pair) => pair.newFile),
+		...diff.newContent,
+	]
+
 	const downloadBytes =
 		diff.categories.changed_same_path.bytes +
 		diff.categories.renamed_same_hash.bytes +
@@ -808,13 +814,160 @@ function buildReportDiagnostics(
 	const renameNoisePercentOfDownloadBytes =
 		downloadBytes > 0 ? (renameNoiseBytes * 100) / downloadBytes : 0
 
+	const topOffenders = {
+		newContentByBytes: selectTopOffenders(diff.newContent),
+		changedSamePathByBytes: selectTopOffenders(
+			diff.changedSamePath.map((pair) => pair.newFile),
+		),
+		renamedSameHashByBytes: selectTopOffenders(
+			diff.renamedSameHash.map((pair) => pair.newFile),
+		),
+	}
+
+	const byAssetType = buildAttributionBuckets(
+		churnContributors,
+		(file) => file.assetType || "unknown",
+	)
+	const byOwnerGroup = buildAttributionBuckets(
+		churnContributors,
+		(file) => file.ownerGroup || "unknown",
+	)
+	const unknownOwnerBytes = churnContributors.reduce((total, file) => {
+		return total + (file.ownerGroup === "unknown" ? file.size : 0)
+	}, 0)
+
+	const recommendations = buildDiagnosticsRecommendations({
+		diff,
+		downloadBytes,
+		renameNoiseBytes,
+		renameNoisePercentOfDownloadBytes,
+		byAssetType,
+		byOwnerGroup,
+		unknownOwnerBytes,
+	})
+
 	return {
 		categories: diff.categories,
 		avoidableChurn: {
 			renameNoiseBytes,
 			renameNoisePercentOfDownloadBytes,
 		},
+		topOffenders,
+		attribution: {
+			byAssetType,
+			byOwnerGroup,
+			unknownOwnerBytes,
+		},
+		recommendations,
 	}
+}
+
+function selectTopOffenders(files: TChurnManifestFile[]) {
+	return [...files]
+		.sort((left, right) => {
+			if (left.size !== right.size) return right.size - left.size
+			return left.path.localeCompare(right.path)
+		})
+		.slice(0, 5)
+		.map((file) => ({
+			path: file.path,
+			bytes: file.size,
+			assetType: file.assetType,
+			ownerGroup: file.ownerGroup,
+		}))
+}
+
+function buildAttributionBuckets(
+	files: TChurnManifestFile[],
+	resolveKey: (file: TChurnManifestFile) => string,
+) {
+	const bucketMap = new Map<string, { files: number; bytes: number }>()
+
+	for (const file of files) {
+		const key = resolveKey(file)
+		const current = bucketMap.get(key)
+		if (!current) {
+			bucketMap.set(key, { files: 1, bytes: file.size })
+			continue
+		}
+		current.files += 1
+		current.bytes += file.size
+	}
+
+	return [...bucketMap.entries()]
+		.map(([key, totals]) => ({
+			key,
+			files: totals.files,
+			bytes: totals.bytes,
+		}))
+		.sort((left, right) => {
+			if (left.bytes !== right.bytes) return right.bytes - left.bytes
+			return left.key.localeCompare(right.key)
+		})
+}
+
+function buildDiagnosticsRecommendations(input: {
+	diff: TManifestDiffResult
+	downloadBytes: number
+	renameNoiseBytes: number
+	renameNoisePercentOfDownloadBytes: number
+	byAssetType: Array<{ key: string; files: number; bytes: number }>
+	byOwnerGroup: Array<{ key: string; files: number; bytes: number }>
+	unknownOwnerBytes: number
+}): string[] {
+	const recommendations: string[] = []
+
+	if (
+		input.renameNoiseBytes > 0 &&
+		input.renameNoisePercentOfDownloadBytes >= 25
+	) {
+		recommendations.push(
+			"High rename churn detected. Stabilize chunk and asset naming to improve client cache reuse.",
+		)
+	}
+
+	if (
+		input.diff.categories.new_content.bytes >
+		input.diff.categories.changed_same_path.bytes
+	) {
+		recommendations.push(
+			"New content dominates download impact. Focus on code-splitting and reducing fresh bundle bytes.",
+		)
+	}
+
+	if (input.byOwnerGroup.length > 0 && input.downloadBytes > 0) {
+		const topOwner = input.byOwnerGroup[0]
+		if (topOwner.bytes / input.downloadBytes >= 0.5) {
+			recommendations.push(
+				`Most churn bytes are in owner group "${topOwner.key}". Start optimization work there for fastest impact.`,
+			)
+		}
+	}
+
+	const sourcemapBucket = input.byAssetType.find(
+		(bucket) => bucket.key === "sourcemap",
+	)
+	if (
+		sourcemapBucket &&
+		input.downloadBytes > 0 &&
+		sourcemapBucket.bytes / input.downloadBytes >= 0.2
+	) {
+		recommendations.push(
+			"Sourcemaps contribute significant churn bytes. Consider excluding maps from deploy sync if production debugging allows.",
+		)
+	}
+
+	if (
+		input.unknownOwnerBytes > 0 &&
+		input.downloadBytes > 0 &&
+		input.unknownOwnerBytes / input.downloadBytes >= 0.1
+	) {
+		recommendations.push(
+			"A notable share of churn is unowned. Improve owner grouping rules to make diagnostics more actionable.",
+		)
+	}
+
+	return recommendations
 }
 
 export function churnError(code: TChurnErrorCode, message: string): Error {
