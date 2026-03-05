@@ -36,6 +36,7 @@ import { runTests } from "./test.js"
 
 const noop = (): void => {}
 let lastProfileUsed: string | undefined
+const DEFAULT_CHURN_HISTORY_OUT = ".deploy/churn-history.jsonl"
 
 interface TDeployArgs {
 	sshConnectionString: string
@@ -170,7 +171,7 @@ const deployCommand = define({
 		churnHistoryOut: {
 			type: "string",
 			description:
-				'Optional churn history destination: "stdout" or a JSONL file path (append mode).',
+				'Churn history destination: "stdout", "off", or a JSONL file path (append mode). Defaults to .deploy/churn-history.jsonl; use "off" to disable.',
 			default: undefined,
 		},
 	},
@@ -515,7 +516,10 @@ function buildDeployArgs(
 		),
 		churnTopN: resolveChurnTopN(values.churnTopN, churnDefaults.topN),
 		churnReportOut: normalizeChurnReportOut(values.churnReportOut),
-		churnHistoryOut: normalizeChurnHistoryOut(values.churnHistoryOut),
+		churnHistoryOut: resolveChurnHistoryOut(
+			values.churnHistoryOut,
+			DEFAULT_CHURN_HISTORY_OUT,
+		),
 		churnGroupRules: churnDefaults.groupRules,
 	}
 }
@@ -566,12 +570,15 @@ function normalizeChurnReportOut(
 	return trimmed.length > 0 ? trimmed : undefined
 }
 
-function normalizeChurnHistoryOut(
-	value: string | undefined,
+function resolveChurnHistoryOut(
+	overrideValue: string | undefined,
+	defaultValue: string,
 ): string | undefined {
-	if (!value) return undefined
-	const trimmed = value.trim()
-	return trimmed.length > 0 ? trimmed : undefined
+	if (!overrideValue) return defaultValue
+	const trimmed = overrideValue.trim()
+	if (trimmed.length === 0) return defaultValue
+	if (trimmed === "off") return undefined
+	return trimmed
 }
 
 function reportCoreToMetrics(report: TChurnReportV1): TChurnMetrics {

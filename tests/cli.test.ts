@@ -383,7 +383,7 @@ describe("src/cli.ts wiring", () => {
 		expect(args.churnDiagnostics).toBe("full")
 		expect(args.churnTopN).toBe(3)
 		expect(args.churnReportOut).toBe("./reports/churn.json")
-		expect(args.churnHistoryOut).toBeUndefined()
+		expect(args.churnHistoryOut).toBe(".deploy/churn-history.jsonl")
 		expect(args.churnGroupRules).toEqual([])
 	})
 
@@ -417,6 +417,38 @@ describe("src/cli.ts wiring", () => {
 		})
 
 		expect(args.churnHistoryOut).toBe("./reports/churn-history.jsonl")
+	})
+
+	it("buildDeployArgs disables churnHistoryOut when set to off", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const cfg = {
+			name: "p",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload" as const,
+			churn: {
+				diagnosticsDefault: "off" as const,
+				topN: 5,
+				groupRules: [],
+			},
+		}
+
+		const args = __test__.buildDeployArgs(cfg, {
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			churnHistoryOut: "off",
+		})
+
+		expect(args.churnHistoryOut).toBeUndefined()
 	})
 
 	it("buildDeployArgs rejects invalid churnDiagnostics override", async () => {
