@@ -155,3 +155,7 @@ The churn module itself remains a library (no direct console I/O):
 - Enhanced diagnostics text/JSON formatting is handled by CLI formatting helpers.
 
 This preserves existing deploy output behavior by default while allowing opt-in diagnostic detail.
+
+Rollout and migration guidance for operational adoption is documented in:
+
+- `docs/specs/churn-rollout.md`
