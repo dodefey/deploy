@@ -74,12 +74,15 @@ function baseReport(): TChurnReportV1 {
 			topOffenders: {
 				newContentByBytes: [
 					{ path: "./new.js", bytes: 512000, assetType: "js" },
+					{ path: "./new-2.js", bytes: 400000, assetType: "js" },
 				],
 				changedSamePathByBytes: [
 					{ path: "./app.js", bytes: 128000, assetType: "js" },
+					{ path: "./app-2.js", bytes: 120000, assetType: "js" },
 				],
 				renamedSameHashByBytes: [
 					{ path: "./renamed.js", bytes: 64000, assetType: "js" },
+					{ path: "./renamed-2.js", bytes: 32000, assetType: "js" },
 				],
 			},
 			attribution: {
@@ -114,6 +117,20 @@ describe("formatChurnReportDiagnostics", () => {
 		expect(output).toContain("./new.js")
 		expect(output).toContain("Attribution by asset type:")
 		expect(output).toContain("Recommendations:")
+	})
+
+	it("limits top offenders in full mode when topN is set", () => {
+		const output = formatChurnReportDiagnostics(baseReport(), {
+			mode: "full",
+			topN: 1,
+		})
+
+		expect(output).toContain("./new.js")
+		expect(output).not.toContain("./new-2.js")
+		expect(output).toContain("./app.js")
+		expect(output).not.toContain("./app-2.js")
+		expect(output).toContain("./renamed.js")
+		expect(output).not.toContain("./renamed-2.js")
 	})
 
 	it("renders warning message when diagnostics are absent", () => {

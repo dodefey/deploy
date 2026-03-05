@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
+import { promises as fs } from "node:fs"
+import * as path from "node:path"
 import { cli, define } from "gunshi"
 import type { TBuildOutputMode } from "./build.js"
 import { runBuild } from "./build.js"
-import type { TChurnOptions } from "./churn.js"
-import { computeClientChurn } from "./churn.js"
+import type { TChurnMetrics, TChurnOptions } from "./churn.js"
+import { computeClientChurn, computeClientChurnReport } from "./churn.js"
 import type { TConfigErrorCode, TResolvedConfig } from "./config.js"
 import { listProfiles, resolveProfile } from "./config.js"
+import { formatChurnReportDiagnostics } from "./churnDiagnosticsFormat.js"
 import {
 	logChurnOnlyStart,
 	logChurnOnlySuccess,
@@ -24,6 +27,7 @@ import {
 import { updatePM2App } from "./pm2.js"
 import { syncBuild } from "./syncBuild.js"
 import { runTests } from "./test.js"
+import type { TChurnReportV1 } from "./churnSchema.js"
 
 // Exit semantics:
 // - Fatal phases: configuration, tests, build, sync, churn-only (exit 1 via handleFatalError).
@@ -48,6 +52,14 @@ interface TDeployArgs {
 	verbose: boolean
 	churnOnly: boolean
 	profileName: string
+	churnDiagnostics?: TChurnDiagnosticsMode
+	churnTopN?: number
+	churnReportOut?: string
+}
+
+type TChurnDiagnosticsMode = "off" | "compact" | "full" | "json"
+type TResolvedConfigWithOptionalChurn = Omit<TResolvedConfig, "churn"> & {
+	churn?: TResolvedConfig["churn"]
 }
 
 const deployCommand = define({
@@ -135,6 +147,24 @@ const deployCommand = define({
 				"Run client churn analysis only (no build, no sync, no PM2; uses current buildDir)",
 			default: false,
 		},
+		churnDiagnostics: {
+			type: "string",
+			description:
+				"Churn diagnostics output mode (off, compact, full, json). Defaults to profile churn.diagnosticsDefault or off.",
+			default: undefined,
+		},
+		churnTopN: {
+			type: "string",
+			description:
+				"Top offenders count for churn diagnostics (positive integer). Defaults to profile churn.topN or 5.",
+			default: undefined,
+		},
+		churnReportOut: {
+			type: "string",
+			description:
+				'Optional churn report output destination: "stdout" or a file path.',
+			default: undefined,
+		},
 	},
 	run: async (ctx) => {
 		const values = ctx.values as {
@@ -149,6 +179,9 @@ const deployCommand = define({
 			skipBuild: boolean
 			verbose: boolean
 			churnOnly: boolean
+			churnDiagnostics?: string
+			churnTopN?: string
+			churnReportOut?: string
 			profile?: string
 		}
 
@@ -162,6 +195,9 @@ const deployCommand = define({
 				skipBuild: values.skipBuild,
 				verbose: values.verbose,
 				churnOnly: values.churnOnly,
+				churnDiagnostics: values.churnDiagnostics,
+				churnTopN: values.churnTopN,
+				churnReportOut: values.churnReportOut,
 			})
 			lastProfileUsed = deploy.profileName
 		} catch (err) {
@@ -289,16 +325,8 @@ async function runPm2Phase(values: TDeployArgs): Promise<void> {
 
 async function runChurnPhase(values: TDeployArgs): Promise<void> {
 	logPhaseStart("Computing client churn metrics")
-	const options: TChurnOptions = {
-		buildDir: values.buildDir,
-		sshConnectionString: values.sshConnectionString,
-		remoteDir: values.remoteDir,
-		dryRun: values.dryRun,
-	}
-
 	try {
-		const metrics = await computeClientChurn(options)
-		logChurnSummary(metrics, { dryRun: values.dryRun })
+		await runChurnAnalysis(values, "deploy")
 		logPhaseSuccess("Client churn analysis complete.")
 	} catch (err) {
 		logNonFatalError("Client churn", err, {
@@ -310,6 +338,21 @@ async function runChurnPhase(values: TDeployArgs): Promise<void> {
 async function runChurnOnlyMode(values: TDeployArgs): Promise<void> {
 	logChurnOnlyStart({ profileName: values.profileName })
 	logPhaseStart("Computing client churn metrics")
+	try {
+		await runChurnAnalysis(values, "churnOnly")
+		logPhaseSuccess("Client churn analysis complete.")
+		logChurnOnlySuccess({ profileName: values.profileName })
+	} catch (err) {
+		handleFatalError("Client churn", err, values.profileName)
+	}
+}
+
+async function runChurnAnalysis(
+	values: TDeployArgs,
+	runMode: "deploy" | "churnOnly",
+): Promise<void> {
+	const mode = values.churnDiagnostics ?? "off"
+	const shouldUseReportPath = mode !== "off" || Boolean(values.churnReportOut)
 	const options: TChurnOptions = {
 		buildDir: values.buildDir,
 		sshConnectionString: values.sshConnectionString,
@@ -317,13 +360,31 @@ async function runChurnOnlyMode(values: TDeployArgs): Promise<void> {
 		dryRun: values.dryRun,
 	}
 
-	try {
+	if (!shouldUseReportPath) {
 		const metrics = await computeClientChurn(options)
 		logChurnSummary(metrics, { dryRun: values.dryRun })
-		logPhaseSuccess("Client churn analysis complete.")
-		logChurnOnlySuccess({ profileName: values.profileName })
-	} catch (err) {
-		handleFatalError("Client churn", err, values.profileName)
+		return
+	}
+
+	const report = await computeClientChurnReport({
+		...options,
+		profileName: values.profileName,
+		runMode,
+	})
+
+	logChurnSummary(reportCoreToMetrics(report), { dryRun: values.dryRun })
+
+	if (mode !== "off") {
+		logPhaseSuccess(
+			formatChurnReportDiagnostics(report, {
+				mode,
+				topN: values.churnTopN,
+			}),
+		)
+	}
+
+	if (values.churnReportOut) {
+		await writeChurnReport(report, values.churnReportOut)
 	}
 }
 
@@ -411,15 +472,24 @@ function applyOverrides(
 }
 
 function buildDeployArgs(
-	merged: TResolvedConfig,
+	merged: TResolvedConfigWithOptionalChurn,
 	values: {
 		dryRun: boolean
 		skipTests: boolean
 		skipBuild: boolean
 		verbose: boolean
 		churnOnly: boolean
+		churnDiagnostics?: string
+		churnTopN?: string
+		churnReportOut?: string
 	},
 ): TDeployArgs {
+	const churnDefaults = merged.churn ?? {
+		diagnosticsDefault: "off" as const,
+		topN: 5,
+		groupRules: [],
+	}
+
 	return {
 		sshConnectionString: merged.sshConnectionString,
 		remoteDir: merged.remoteDir,
@@ -435,7 +505,96 @@ function buildDeployArgs(
 		verbose: values.verbose,
 		churnOnly: values.churnOnly,
 		profileName: merged.name,
+		churnDiagnostics: resolveChurnDiagnosticsMode(
+			values.churnDiagnostics,
+			churnDefaults.diagnosticsDefault,
+		),
+		churnTopN: resolveChurnTopN(values.churnTopN, churnDefaults.topN),
+		churnReportOut: normalizeChurnReportOut(values.churnReportOut),
 	}
+}
+
+function resolveChurnDiagnosticsMode(
+	overrideValue: string | undefined,
+	defaultValue: TChurnDiagnosticsMode,
+): TChurnDiagnosticsMode {
+	if (!overrideValue) return defaultValue
+	const trimmed = overrideValue.trim()
+	if (
+		trimmed === "off" ||
+		trimmed === "compact" ||
+		trimmed === "full" ||
+		trimmed === "json"
+	) {
+		return trimmed
+	}
+	const err = new Error(
+		`Invalid churnDiagnostics value "${overrideValue}". Use off, compact, full, or json.`,
+	)
+	err.cause = "CONFIG_PROFILE_INVALID"
+	throw err
+}
+
+function resolveChurnTopN(
+	overrideValue: string | undefined,
+	defaultValue: number,
+): number {
+	if (!overrideValue) return defaultValue
+	const trimmed = overrideValue.trim()
+	const parsed = Number(trimmed)
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		const err = new Error(
+			`Invalid churnTopN value "${overrideValue}". Use a positive integer.`,
+		)
+		err.cause = "CONFIG_PROFILE_INVALID"
+		throw err
+	}
+	return parsed
+}
+
+function normalizeChurnReportOut(
+	value: string | undefined,
+): string | undefined {
+	if (!value) return undefined
+	const trimmed = value.trim()
+	return trimmed.length > 0 ? trimmed : undefined
+}
+
+function reportCoreToMetrics(report: TChurnReportV1): TChurnMetrics {
+	const { core } = report
+	return {
+		totalOldFiles: core.files.totalOld,
+		totalNewFiles: core.files.totalNew,
+		stableFiles: core.files.stable,
+		changedFiles: core.files.changed,
+		addedFiles: core.files.added,
+		removedFiles: core.files.removed,
+		totalOldBytes: core.bytes.totalOld,
+		totalNewBytes: core.bytes.totalNew,
+		stableBytes: core.bytes.stable,
+		changedBytes: core.bytes.changed,
+		addedBytes: core.bytes.added,
+		removedBytes: core.bytes.removed,
+		downloadImpactFilesPercent: core.percent.downloadImpactFiles,
+		cacheReuseFilesPercent: core.percent.cacheReuseFiles,
+		downloadImpactBytesPercent: core.percent.downloadImpactBytes,
+		cacheReuseBytesPercent: core.percent.cacheReuseBytes,
+	}
+}
+
+async function writeChurnReport(
+	report: TChurnReportV1,
+	output: string,
+): Promise<void> {
+	const content = JSON.stringify(report, null, 2) + "\n"
+	if (output === "stdout") {
+		logPhaseSuccess(content)
+		return
+	}
+	const outputPath = path.resolve(process.cwd(), output)
+	await fs.mkdir(path.dirname(outputPath), { recursive: true })
+	await fs.writeFile(outputPath, content, "utf8")
+	logPhaseSuccess(`Churn report written to ${outputPath}`)
 }
 
 function handleFatalError(

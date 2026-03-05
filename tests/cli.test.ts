@@ -8,7 +8,76 @@ type MockConfig = {
 	runTestsImpl?: () => any
 	syncBuildImpl?: () => any
 	computeClientChurnImpl?: () => any
+	computeClientChurnReportImpl?: () => any
+	formatChurnReportDiagnosticsImpl?: () => any
 	gunshiCliImpl?: () => any
+}
+
+function buildReportFixture() {
+	return {
+		schema: "com.dodefey.churn-report",
+		schemaVersion: "1.0.0",
+		metricSetVersion: "core-1",
+		reportId: "report-1",
+		generatedAt: "2026-03-05T16:00:02Z",
+		producer: {
+			name: "@dodefey/deploy",
+			version: "0.2.0",
+		},
+		run: {
+			profile: "p",
+			mode: "deploy",
+			dryRun: false,
+		},
+		baseline: {
+			available: true,
+			kind: "previous_deploy",
+			distance: 1,
+		},
+		capabilities: {
+			hashDiff: true,
+			renameDetection: "hash-match-v1",
+			assetTyping: "extension-v1",
+			ownerGrouping: "heuristic-v1",
+		},
+		core: {
+			files: {
+				totalOld: 10,
+				totalNew: 12,
+				stable: 5,
+				changed: 2,
+				added: 3,
+				removed: 1,
+			},
+			bytes: {
+				totalOld: 1000,
+				totalNew: 1500,
+				stable: 500,
+				changed: 300,
+				added: 700,
+				removed: 200,
+			},
+			percent: {
+				downloadImpactFiles: 41.7,
+				cacheReuseFiles: 58.3,
+				downloadImpactBytes: 66.7,
+				cacheReuseBytes: 33.3,
+			},
+		},
+		diagnostics: {
+			categories: {
+				reused_exact: { files: 5, bytes: 500 },
+				changed_same_path: { files: 2, bytes: 300 },
+				renamed_same_hash: { files: 2, bytes: 400 },
+				new_content: { files: 3, bytes: 700 },
+				removed: { files: 1, bytes: 200 },
+			},
+		},
+		quality: {
+			comparableClass: "core-1+hash-v1",
+			warnings: [],
+		},
+	}
 }
 
 function setupMocks(config: MockConfig = {}) {
@@ -76,6 +145,20 @@ function setupMocks(config: MockConfig = {}) {
 			.mockImplementation(
 				config.computeClientChurnImpl ??
 					(() => Promise.resolve("metrics")),
+			),
+		computeClientChurnReport: vi
+			.fn()
+			.mockImplementation(
+				config.computeClientChurnReportImpl ??
+					(() => Promise.resolve(buildReportFixture())),
+			),
+	}))
+	vi.doMock("./../src/churnDiagnosticsFormat.ts", () => ({
+		formatChurnReportDiagnostics: vi
+			.fn()
+			.mockImplementation(
+				config.formatChurnReportDiagnosticsImpl ??
+					(() => "formatted diagnostics"),
 			),
 	}))
 	vi.doMock("gunshi", () => ({
@@ -261,6 +344,104 @@ describe("src/cli.ts wiring", () => {
 			churnOnly: false,
 			profileName: "p",
 		})
+	})
+
+	it("buildDeployArgs applies churn defaults and parses churn overrides", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const cfg = {
+			name: "p",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload" as const,
+			churn: {
+				diagnosticsDefault: "compact" as const,
+				topN: 7,
+				groupRules: [],
+			},
+		}
+
+		const args = __test__.buildDeployArgs(cfg, {
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			churnDiagnostics: "full",
+			churnTopN: "3",
+			churnReportOut: "  ./reports/churn.json  ",
+		})
+
+		expect(args.churnDiagnostics).toBe("full")
+		expect(args.churnTopN).toBe(3)
+		expect(args.churnReportOut).toBe("./reports/churn.json")
+	})
+
+	it("buildDeployArgs rejects invalid churnDiagnostics override", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const cfg = {
+			name: "p",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload" as const,
+		}
+
+		expect(() =>
+			__test__.buildDeployArgs(cfg, {
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: false,
+				churnOnly: false,
+				churnDiagnostics: "invalid-mode",
+			}),
+		).toThrowError(
+			expect.objectContaining({
+				cause: "CONFIG_PROFILE_INVALID",
+			}),
+		)
+	})
+
+	it("buildDeployArgs rejects invalid churnTopN override", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const cfg = {
+			name: "p",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload" as const,
+		}
+
+		expect(() =>
+			__test__.buildDeployArgs(cfg, {
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: false,
+				churnOnly: false,
+				churnTopN: "0",
+			}),
+		).toThrowError(
+			expect.objectContaining({
+				cause: "CONFIG_PROFILE_INVALID",
+			}),
+		)
 	})
 
 	it("runPm2Phase treats PM2_APP_NAME_NOT_FOUND as fatal", async () => {
@@ -756,5 +937,101 @@ describe("src/cli.ts wiring", () => {
 			{ profileName: "p" },
 		)
 		expect(exitSpy).toHaveBeenCalledWith(1)
+	})
+
+	it("runChurnPhase uses report path and diagnostics formatter when enabled", async () => {
+		const computeLegacyMock = vi.fn().mockResolvedValue("metrics")
+		const computeReportMock = vi
+			.fn()
+			.mockResolvedValue(buildReportFixture())
+		const formatDiagnosticsMock = vi.fn().mockReturnValue("diag-output")
+		const { logFns } = setupMocks({
+			computeClientChurnImpl: computeLegacyMock,
+			computeClientChurnReportImpl: computeReportMock,
+			formatChurnReportDiagnosticsImpl: formatDiagnosticsMock,
+		})
+		const { __test__ } = await importMain()
+
+		await __test__.runChurnPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			profileName: "p",
+			churnDiagnostics: "full",
+			churnTopN: 2,
+		})
+
+		expect(computeLegacyMock).not.toHaveBeenCalled()
+		expect(computeReportMock).toHaveBeenCalledWith({
+			buildDir: "/b",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			dryRun: false,
+			profileName: "p",
+			runMode: "deploy",
+		})
+		expect(formatDiagnosticsMock).toHaveBeenCalledWith(
+			expect.objectContaining({ schema: "com.dodefey.churn-report" }),
+			{ mode: "full", topN: 2 },
+		)
+		expect(logFns.logChurnSummary).toHaveBeenCalled()
+		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith("diag-output")
+	})
+
+	it("runChurnOnlyMode writes report JSON to stdout when requested", async () => {
+		const computeLegacyMock = vi.fn().mockResolvedValue("metrics")
+		const computeReportMock = vi
+			.fn()
+			.mockResolvedValue(buildReportFixture())
+		const formatDiagnosticsMock = vi.fn().mockReturnValue("diag-output")
+		const { logFns } = setupMocks({
+			computeClientChurnImpl: computeLegacyMock,
+			computeClientChurnReportImpl: computeReportMock,
+			formatChurnReportDiagnosticsImpl: formatDiagnosticsMock,
+		})
+		const { __test__ } = await importMain()
+
+		await __test__.runChurnOnlyMode({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: true,
+			profileName: "p",
+			churnDiagnostics: "off",
+			churnReportOut: "stdout",
+		})
+
+		expect(computeLegacyMock).not.toHaveBeenCalled()
+		expect(computeReportMock).toHaveBeenCalledWith({
+			buildDir: "/b",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			dryRun: false,
+			profileName: "p",
+			runMode: "churnOnly",
+		})
+		expect(formatDiagnosticsMock).not.toHaveBeenCalled()
+		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
+			expect.stringContaining('"schema": "com.dodefey.churn-report"'),
+		)
 	})
 })

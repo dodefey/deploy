@@ -5,6 +5,7 @@ export type TChurnDiagnosticsOutputMode = "compact" | "full" | "json"
 
 export interface TChurnDiagnosticsFormatOptions {
 	mode?: TChurnDiagnosticsOutputMode
+	topN?: number
 }
 
 export function formatChurnReportDiagnostics(
@@ -31,7 +32,7 @@ export function formatChurnReportDiagnostics(
 		return buildCompactDiagnostics(report)
 	}
 
-	return buildFullDiagnostics(report)
+	return buildFullDiagnostics(report, options?.topN)
 }
 
 function buildCompactDiagnostics(report: TChurnReportV1): string {
@@ -67,7 +68,7 @@ function buildCompactDiagnostics(report: TChurnReportV1): string {
 	return lines.join("\n")
 }
 
-function buildFullDiagnostics(report: TChurnReportV1): string {
+function buildFullDiagnostics(report: TChurnReportV1, topN?: number): string {
 	const diagnostics = report.diagnostics
 	if (!diagnostics) {
 		return "Churn diagnostics (full)\n  No diagnostics available."
@@ -103,18 +104,21 @@ function buildFullDiagnostics(report: TChurnReportV1): string {
 			...formatOffenderGroup(
 				"new_content",
 				diagnostics.topOffenders.newContentByBytes,
+				topN,
 			),
 		)
 		lines.push(
 			...formatOffenderGroup(
 				"changed_same_path",
 				diagnostics.topOffenders.changedSamePathByBytes,
+				topN,
 			),
 		)
 		lines.push(
 			...formatOffenderGroup(
 				"renamed_same_hash",
 				diagnostics.topOffenders.renamedSameHashByBytes,
+				topN,
 			),
 		)
 	}
@@ -179,12 +183,18 @@ function formatOffenderGroup(
 				ownerGroup?: string
 		  }>
 		| undefined,
+	topN?: number,
 ): string[] {
 	if (!offenders || offenders.length === 0) {
 		return [`  - ${label}: none`]
 	}
+	const limit =
+		typeof topN === "number" && Number.isInteger(topN) && topN > 0
+			? topN
+			: offenders.length
+	const limited = offenders.slice(0, limit)
 	const lines = [`  - ${label}:`]
-	for (const offender of offenders) {
+	for (const offender of limited) {
 		lines.push(`    ${offender.path} (${formatBytes(offender.bytes)})`)
 	}
 	return lines
