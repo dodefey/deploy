@@ -494,18 +494,14 @@ export async function uploadRemoteManifest(
 ): Promise<void> {
 	const quotedPath = shellQuoteSingle(remoteManifestPath)
 	const quotedDir = shellQuoteSingle(path.dirname(remoteManifestPath))
-	const manifestBase64 = Buffer.from(manifestContent, "utf8").toString(
-		"base64",
+	const command = `mkdir -p ${quotedDir} && cat > ${quotedPath}`
+
+	const result = await runSshCommand(
+		sshConnectionString,
+		sshOpts,
+		command,
+		manifestContent,
 	)
-
-	const command = [
-		`mkdir -p ${quotedDir}`,
-		`base64 -d > ${quotedPath} <<'EOF'`,
-		manifestBase64,
-		"EOF",
-	].join("\n")
-
-	const result = await runSshCommand(sshConnectionString, sshOpts, command)
 
 	if (result.spawnError) {
 		throw churnError(
@@ -527,6 +523,7 @@ function runSshCommand(
 	sshConnectionString: string,
 	sshOpts: string[],
 	command: string,
+	stdinContent?: string,
 ): Promise<TSshCommandResult> {
 	return new Promise((resolve) => {
 		let stdout = ""
@@ -541,8 +538,13 @@ function runSshCommand(
 		}
 
 		const child = spawn("ssh", [...sshOpts, sshConnectionString, command], {
-			stdio: ["ignore", "pipe", "pipe"],
+			stdio: ["pipe", "pipe", "pipe"],
 		})
+
+		child.stdin.on("error", (err) => {
+			stderr += String(err)
+		})
+		child.stdin.end(stdinContent ?? "", "utf8")
 
 		child.stdout.on("data", (chunk) => {
 			stdout += String(chunk)
