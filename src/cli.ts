@@ -55,6 +55,7 @@ interface TDeployArgs {
 	churnDiagnostics?: TChurnDiagnosticsMode
 	churnTopN?: number
 	churnReportOut?: string
+	churnHistoryOut?: string
 	churnGroupRules?: Array<{ pattern: string; group: string }>
 }
 
@@ -166,6 +167,12 @@ const deployCommand = define({
 				'Optional churn report output destination: "stdout" or a file path.',
 			default: undefined,
 		},
+		churnHistoryOut: {
+			type: "string",
+			description:
+				'Optional churn history destination: "stdout" or a JSONL file path (append mode).',
+			default: undefined,
+		},
 	},
 	run: async (ctx) => {
 		const values = ctx.values as {
@@ -183,6 +190,7 @@ const deployCommand = define({
 			churnDiagnostics?: string
 			churnTopN?: string
 			churnReportOut?: string
+			churnHistoryOut?: string
 			profile?: string
 		}
 
@@ -199,6 +207,7 @@ const deployCommand = define({
 				churnDiagnostics: values.churnDiagnostics,
 				churnTopN: values.churnTopN,
 				churnReportOut: values.churnReportOut,
+				churnHistoryOut: values.churnHistoryOut,
 			})
 			lastProfileUsed = deploy.profileName
 		} catch (err) {
@@ -376,6 +385,10 @@ async function runChurnAnalysis(
 	if (values.churnReportOut) {
 		await writeChurnReport(report, values.churnReportOut)
 	}
+
+	if (values.churnHistoryOut) {
+		await appendChurnHistory(report, values.churnHistoryOut)
+	}
 }
 
 function selectConfig(
@@ -472,6 +485,7 @@ function buildDeployArgs(
 		churnDiagnostics?: string
 		churnTopN?: string
 		churnReportOut?: string
+		churnHistoryOut?: string
 	},
 ): TDeployArgs {
 	const churnDefaults = merged.churn ?? {
@@ -501,6 +515,7 @@ function buildDeployArgs(
 		),
 		churnTopN: resolveChurnTopN(values.churnTopN, churnDefaults.topN),
 		churnReportOut: normalizeChurnReportOut(values.churnReportOut),
+		churnHistoryOut: normalizeChurnHistoryOut(values.churnHistoryOut),
 		churnGroupRules: churnDefaults.groupRules,
 	}
 }
@@ -551,6 +566,14 @@ function normalizeChurnReportOut(
 	return trimmed.length > 0 ? trimmed : undefined
 }
 
+function normalizeChurnHistoryOut(
+	value: string | undefined,
+): string | undefined {
+	if (!value) return undefined
+	const trimmed = value.trim()
+	return trimmed.length > 0 ? trimmed : undefined
+}
+
 function reportCoreToMetrics(report: TChurnReportV1): TChurnMetrics {
 	const { core } = report
 	return {
@@ -586,6 +609,46 @@ async function writeChurnReport(
 	await fs.mkdir(path.dirname(outputPath), { recursive: true })
 	await fs.writeFile(outputPath, content, "utf8")
 	logPhaseSuccess(`Churn report written to ${outputPath}`)
+}
+
+async function appendChurnHistory(
+	report: TChurnReportV1,
+	output: string,
+): Promise<void> {
+	const diagnostics = report.diagnostics
+	const historyRecord = {
+		schema: "com.dodefey.churn-history-record",
+		schemaVersion: "1.0.0",
+		reportId: report.reportId,
+		generatedAt: report.generatedAt,
+		profile: report.run.profile,
+		mode: report.run.mode,
+		dryRun: report.run.dryRun,
+		baseline: report.baseline,
+		core: report.core,
+		diagnosticsSummary: diagnostics
+			? {
+					categories: diagnostics.categories,
+					renameNoiseBytes:
+						diagnostics.avoidableChurn?.renameNoiseBytes,
+					renameNoisePercentOfDownloadBytes:
+						diagnostics.avoidableChurn
+							?.renameNoisePercentOfDownloadBytes,
+				}
+			: undefined,
+	}
+
+	const content = JSON.stringify(historyRecord) + "\n"
+
+	if (output === "stdout") {
+		logPhaseSuccess(content)
+		return
+	}
+
+	const outputPath = path.resolve(process.cwd(), output)
+	await fs.mkdir(path.dirname(outputPath), { recursive: true })
+	await fs.appendFile(outputPath, content, "utf8")
+	logPhaseSuccess(`Churn history appended to ${outputPath}`)
 }
 
 function handleFatalError(

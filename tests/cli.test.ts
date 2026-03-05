@@ -383,7 +383,40 @@ describe("src/cli.ts wiring", () => {
 		expect(args.churnDiagnostics).toBe("full")
 		expect(args.churnTopN).toBe(3)
 		expect(args.churnReportOut).toBe("./reports/churn.json")
+		expect(args.churnHistoryOut).toBeUndefined()
 		expect(args.churnGroupRules).toEqual([])
+	})
+
+	it("buildDeployArgs normalizes churnHistoryOut override", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const cfg = {
+			name: "p",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload" as const,
+			churn: {
+				diagnosticsDefault: "off" as const,
+				topN: 5,
+				groupRules: [],
+			},
+		}
+
+		const args = __test__.buildDeployArgs(cfg, {
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			churnHistoryOut: "  ./reports/churn-history.jsonl  ",
+		})
+
+		expect(args.churnHistoryOut).toBe("./reports/churn-history.jsonl")
 	})
 
 	it("buildDeployArgs rejects invalid churnDiagnostics override", async () => {
@@ -1207,6 +1240,42 @@ describe("src/cli.ts wiring", () => {
 		expect(formatDiagnosticsMock).not.toHaveBeenCalled()
 		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
 			expect.stringContaining('"schema": "com.dodefey.churn-report"'),
+		)
+	})
+
+	it("runChurnPhase writes churn history record to stdout when requested", async () => {
+		const computeReportMock = vi
+			.fn()
+			.mockResolvedValue(buildReportFixture())
+		const { logFns } = setupMocks({
+			computeClientChurnReportImpl: computeReportMock,
+		})
+		const { __test__ } = await importMain()
+
+		await __test__.runChurnPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			profileName: "p",
+			churnDiagnostics: "off",
+			churnHistoryOut: "stdout",
+		})
+
+		expect(computeReportMock).toHaveBeenCalled()
+		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
+			expect.stringContaining(
+				'"schema":"com.dodefey.churn-history-record"',
+			),
 		)
 	})
 })
