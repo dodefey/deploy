@@ -257,6 +257,11 @@ describe("src/cli.ts wiring", () => {
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload" as const,
+			churn: {
+				diagnosticsDefault: "off" as const,
+				topN: 5,
+				groupRules: [],
+			},
 		}
 
 		expect(() =>
@@ -279,6 +284,11 @@ describe("src/cli.ts wiring", () => {
 			env: "prod",
 			pm2AppName: "app",
 			pm2RestartMode: "startOrReload" as const,
+			churn: {
+				diagnosticsDefault: "off" as const,
+				topN: 5,
+				groupRules: [],
+			},
 		}
 		const overrides = {
 			sshConnectionString: " s2 ",
