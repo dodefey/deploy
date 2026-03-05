@@ -9,6 +9,7 @@ A small gunshi-based CLI that deploys a **profile-defined build** managed by PM2
 - Typed error codes across build, sync, PM2, config, and churn for predictable handling.
 - Flexible output modes (`inherit`, `silent`, `callbacks`) for build/rsync/PM2 stages.
 - Dry-run mode: run build + churn and perform an rsync `--dry-run`; skip PM2 restart and make no remote writes.
+- Optional enhanced churn diagnostics/report output for actionable churn analysis.
 
 ## Requirements
 
@@ -46,7 +47,12 @@ Profiles live in your project root (`./profiles.json`). The CLI looks in the cur
 		"buildCommand": "npx", // required
 		"buildArgs": ["nuxt", "build", "--dotenv", ".env.production"], // required
 		"buildDir": ".output", // optional, defaults to .output
-		"pm2RestartMode": "startOrReload" // optional, defaults to startOrReload
+		"pm2RestartMode": "startOrReload", // optional, defaults to startOrReload
+		"churn": {
+			"diagnosticsDefault": "compact", // optional: off|compact|full|json (default off)
+			"topN": 5, // optional positive integer (default 5)
+			"groupRules": [{ "pattern": "vendor", "group": "vendor" }] // optional
+		}
 	}
 ]
 ```
@@ -77,6 +83,9 @@ Flags (from `src/cli.ts`):
 - `--dryRun, -n` Run build + churn; rsync in `--dry-run` mode; skip PM2 restart (no remote writes).
 - `--verbose, -V` Inherit stdout/stderr from build/rsync/pm2.
 - `--churnOnly, -c` Compute churn without build/sync/pm2.
+- `--churnDiagnostics <off|compact|full|json>` Enable enhanced churn diagnostics output mode.
+- `--churnTopN <n>` Limit top offenders shown in diagnostics output.
+- `--churnReportOut <stdout|path>` Emit canonical churn report JSON to stdout or a file path.
 
 Example:
 
@@ -96,7 +105,9 @@ node dist/cli.js deploy \
 3. **Build**: Run the profile-defined build command (via `runBuild`); stdout mode per `--verbose`.
 4. **Sync**: `rsync` local `.output` to `${remoteDir}/.output` (or override), honors `--dryRun`.
 5. **PM2**: `pm2 startOrReload` (or `reboot`) app in `remoteDir`; reports instance count.
-6. **Churn**: Compute client bundle churn vs previous manifest stored at `${remoteDir}/.deploy/manifest`; uploads new manifest unless `--dryRun`.
+6. **Churn**:
+    - Default path (backward-compatible): compute summary metrics vs `${remoteDir}/.deploy/manifest`; upload updated manifest unless `--dryRun`.
+    - Enhanced path (when diagnostics/report output is requested): also use `${remoteDir}/.deploy/manifest.v2.json` for hash-aware diagnostics and write a canonical report payload.
 
 ## Scripts
 
@@ -122,6 +133,7 @@ node dist/cli.js deploy \
 - **PM2 app missing**: check `pm2AppName` matches the ecosystem config on the server.
 - **rsync errors**: verify SSH connectivity and remote write permissions to `${remoteDir}/.output`.
 - **Churn baseline missing**: first deploy will store a baseline manifest; subsequent runs compare against it.
+- **Enhanced diagnostics unavailable**: a first enhanced run may lack `manifest.v2.json` baseline; core churn still works and report warnings explain diagnostics gaps.
 
 ## License
 

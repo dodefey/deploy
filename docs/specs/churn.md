@@ -2,156 +2,156 @@
 
 ## 1. Purpose
 
-The churn module measures **client-bundle cache impact** for returning users after a deploy.
-It answers:
+The churn module measures client-bundle cache impact for returning users and now supports two output levels:
 
-- **How much of the new bundle can be reused from browser cache?**
-- **How much must be downloaded again, in files and bytes?**
+- `computeClientChurn`: legacy core metrics only.
+- `computeClientChurnReport`: canonical report envelope with core metrics plus hash-based diagnostics when available.
 
-This expresses the _real-world impact_ of a deploy on repeat visitors.
-
-The comparison is based on **file URLs (paths)** and **file sizes**, matching how browsers actually cache fingerprinted assets.
+Default deploy behavior remains legacy-compatible unless diagnostics/report output is explicitly requested by CLI/config.
 
 ---
 
-## 2. Manifest Format
+## 2. Manifest Inputs and Locations
 
-Manifests represent all client bundle assets and encode only the necessary data:
+All churn analysis starts from the local client directory:
 
+```txt
+buildDir/public/_nuxt
 ```
+
+Remote manifests live outside rsync-managed output:
+
+- Legacy manifest: `remoteDir/.deploy/manifest`
+- Rich manifest v2: `remoteDir/.deploy/manifest.v2.json`
+
+Keeping them under `.deploy/` ensures persistence across deploys and avoids deletion by bundle sync operations.
+
+---
+
+## 3. Legacy Manifest (`manifest`)
+
+Legacy manifest lines use:
+
+```txt
 <size>  ./relative/path/to/asset.js
 ```
 
 Properties:
 
-- **File identity = URL (path)**  
-  Nuxt filenames are already content-hashed, so filenames uniquely identify versions.
-- **Size included** for byte-impact analysis.
-- **Sorted lexicographically**, newline-separated.
-- Always ends with a newline when non-empty.
+- File identity is path.
+- Size is included for byte impact calculations.
+- Entries are sorted lexicographically.
+- File ends with `\n` when non-empty.
+
+This format powers stable, existing `TChurnMetrics` behavior.
 
 ---
 
-## 3. Manifest Locations
+## 4. Manifest v2 (`manifest.v2.json`)
 
-### Local manifest
+Manifest v2 is a JSON payload with schema/version metadata and per-file records:
 
-Generated from:
+- `path`
+- `size`
+- `sha256`
+- `assetType` (extension-based classifier)
+- `ownerGroup` (heuristic group inference, e.g. vendor/layout/page/component/unknown)
 
-```
-buildDir/public/_nuxt
-```
-
-### Remote manifest
-
-Stored at:
-
-```
-remoteDir/.deploy/manifest
-```
-
-Reasoning:
-
-- Must **persist across deploys**.
-- Must **not** live inside `.output`, because rsync wipes that directory.
-- Stored in a dedicated deploy metadata directory.
+Schema and parsing are defined in `src/churnSchema.ts` and are major-version compatible for forward evolution.
 
 ---
 
-## 4. Churn Metrics
+## 5. Core Metrics Model
 
-Churn is computed with both **file counts** and **byte counts**.
+Core metrics remain unchanged and are still derived from path+size comparisons:
 
-### 4.1 File counts
+- File totals and transitions: old/new/stable/changed/added/removed
+- Byte totals and transitions: old/new/stable/changed/added/removed
+- Percentages:
+    - file download impact / cache reuse
+    - byte download impact / cache reuse
 
-- `totalOldFiles`
-- `totalNewFiles`
-- `stableFiles`
-- `changedFiles`
-- `addedFiles`
-- `removedFiles`
-
-### 4.2 Byte counts
-
-- `totalOldBytes`
-- `totalNewBytes`
-- `stableBytes`
-- `changedBytes`
-- `addedBytes`
-- `removedBytes`
-
-### 4.3 Percentages
-
-#### File-based:
-
-- `downloadImpactFilesPercent = (changedFiles + addedFiles) / totalNewFiles * 100`
-- `cacheReuseFilesPercent = stableFiles / totalNewFiles * 100`
-
-#### Byte-based:
-
-- `downloadImpactBytesPercent = (changedBytes + addedBytes) / totalNewBytes * 100`
-- `cacheReuseBytesPercent = stableBytes / totalNewBytes * 100`
+These core metrics are the comparability anchor (`metricSetVersion = "core-1"` in reports).
 
 ---
 
-## 5. Comparison Rules
+## 6. Hash-Aware Diff Categories (v2)
 
-- **added** → path not in old manifest
-- **removed** → path not in new manifest
-- **stable** → same path, same size
-- **changed** → same path, different size
+When both old and new manifest v2 are available, the module computes:
 
----
+- `reused_exact`: same path, same hash
+- `changed_same_path`: same path, different hash
+- `renamed_same_hash`: different path, same hash
+- `new_content`: new path with no hash match in removed set
+- `removed`: old path removed with no rename/hash match
 
-## 6. computeClientChurn Behavior
-
-1. Compute local manifest.
-2. Load remote manifest (missing = baseline miss).
-3. Compare manifests.
-4. If `dryRun === false`, upload updated manifest.
-5. Return churn metrics.
-
-Dry-run still computes churn but does _not_ upload a manifest.
+These categories provide root-cause diagnostics beyond aggregate churn.
 
 ---
 
-## 7. Error Model
+## 7. Public APIs
 
-Errors use `.cause` with the following codes:
+### 7.1 `computeClientChurn(opts)`
+
+Behavior:
+
+1. Build local legacy manifest.
+2. Load remote legacy manifest (missing means no baseline).
+3. Compute `TChurnMetrics`.
+4. Upload legacy manifest unless `dryRun`.
+
+### 7.2 `computeClientChurnReport(opts)`
+
+Behavior:
+
+1. Build local legacy manifest and local manifest v2.
+2. Load remote legacy manifest and remote manifest v2.
+3. Compute core metrics from legacy manifests.
+4. If remote v2 exists and parses, compute hash-aware diagnostics.
+5. Build `TChurnReportV1` envelope.
+6. Upload legacy manifest and v2 manifest unless `dryRun`.
+
+If remote v2 is missing or invalid, report is still returned with core metrics and quality warnings explaining diagnostics unavailability.
+
+---
+
+## 8. Canonical Report (`TChurnReportV1`)
+
+Report includes:
+
+- Identity/versioning: `schema`, `schemaVersion`, `metricSetVersion`, `reportId`, `generatedAt`
+- Run metadata: producer, profile, mode, dry-run
+- Baseline metadata: availability/kind/distance
+- Capability metadata (hash diff availability and classifier versions)
+- `core` metrics (same semantics as legacy output)
+- Optional `diagnostics` (category totals, avoidable rename noise)
+- `quality` metadata (comparability class + warnings)
+
+Comparability rule of thumb:
+
+- Always compare `core` metrics for stable trend continuity.
+- Use `quality.comparableClass` to segment analyses when diagnostics capability differs.
+
+---
+
+## 9. Error Model
+
+Churn errors use `.cause`:
 
 - `CHURN_REMOTE_MANIFEST_FETCH_FAILED`
 - `CHURN_REMOTE_MANIFEST_UPLOAD_FAILED`
 - `CHURN_COMPUTE_FAILED`
-- `CHURN_NO_CLIENT_DIR` (if thrown, see taxonomy)
+- `CHURN_NO_CLIENT_DIR`
 
-Notes:
-
-- If a “no client dir” condition needs to be represented, use `CHURN_NO_CLIENT_DIR` consistently across taxonomy, spec, and implementation.
+`computeClientChurnReport` preserves this model and adds diagnostics warnings in-report instead of introducing new fatal codes for missing/invalid v2 baselines.
 
 ---
 
-## 8. SSH Behavior
+## 10. Output Contract
 
-- Uses hardened SSH options.
-- Safe quoting for remote paths.
-- Uses `test -f` to detect existence.
-- Resolves command result **exactly once**.
+The churn module itself remains a library (no direct console I/O):
 
----
+- Legacy CLI summary still consumes `TChurnMetrics`.
+- Enhanced diagnostics text/JSON formatting is handled by CLI formatting helpers.
 
-## 9. Module Design Principles
-
-- Pure library (no console I/O).
-- Deterministic outputs.
-- Clean manifest pipeline.
-- Survives rsync wipes.
-
----
-
-## 10. Output Format
-
-```
-Client cache impact
-  Files: X.X% need (re)download (...)
-  Bytes: X.X% need (re)download (...)
-```
+This preserves existing deploy output behavior by default while allowing opt-in diagnostic detail.
