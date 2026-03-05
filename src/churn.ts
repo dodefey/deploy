@@ -1,9 +1,18 @@
 import { spawn } from "node:child_process"
+import { createHash } from "node:crypto"
 import { promises as fs } from "node:fs"
 import * as path from "node:path"
+import {
+	CHURN_MANIFEST_SCHEMA,
+	CHURN_MANIFEST_SCHEMA_VERSION,
+	parseChurnManifestV2Json,
+	type TChurnManifestV2,
+	type TChurnManifestV2File,
+} from "./churnSchema.js"
 
 const CLIENT_SUBDIR = "public/_nuxt"
 const CLIENT_MANIFEST_NAME = "manifest"
+const CLIENT_MANIFEST_V2_NAME = "manifest.v2.json"
 
 const DEFAULT_SSH_OPTS = [
 	"-4",
@@ -56,6 +65,11 @@ type TRemoteManifestResult =
 	| { kind: "none" }
 	| { kind: "error"; reason: string }
 	| { kind: "ok"; content: string }
+
+type TRemoteManifestV2Result =
+	| { kind: "none" }
+	| { kind: "error"; reason: string }
+	| { kind: "ok"; manifest: TChurnManifestV2; content: string }
 
 interface TSshCommandResult {
 	code: number | null
@@ -132,6 +146,11 @@ export function buildRemoteManifestPath(remoteDir: string): string {
 	return `${remoteDir}/.deploy/${CLIENT_MANIFEST_NAME}`
 }
 
+export function buildRemoteManifestV2Path(remoteDir: string): string {
+	// Keep the manifest outside the rsync'd .output tree so it survives deploys.
+	return `${remoteDir}/.deploy/${CLIENT_MANIFEST_V2_NAME}`
+}
+
 async function directoryExists(dir: string): Promise<boolean> {
 	try {
 		const stat = await fs.stat(dir)
@@ -155,6 +174,43 @@ async function buildLocalManifestContent(clientDir: string): Promise<string> {
 
 	const content = entries.join("\n") + (entries.length ? "\n" : "")
 	return content
+}
+
+export async function buildLocalManifestV2(
+	clientDir: string,
+): Promise<TChurnManifestV2> {
+	const files = await collectFiles(clientDir)
+	const entries: TChurnManifestV2File[] = []
+
+	for (const file of files) {
+		const size = await getFileSize(file)
+		const normalizedPath = normalizeManifestPath(clientDir, file)
+		const sha256 = await hashFileSha256(file)
+		entries.push({
+			path: normalizedPath,
+			size,
+			sha256,
+			assetType: detectAssetType(normalizedPath),
+			ownerGroup: inferOwnerGroup(normalizedPath),
+		})
+	}
+
+	entries.sort((left, right) => left.path.localeCompare(right.path))
+
+	return {
+		schema: CHURN_MANIFEST_SCHEMA,
+		schemaVersion: CHURN_MANIFEST_SCHEMA_VERSION,
+		generatedAt: new Date().toISOString(),
+		root: CLIENT_SUBDIR,
+		files: entries,
+	}
+}
+
+export async function buildLocalManifestV2Content(
+	clientDir: string,
+): Promise<string> {
+	const manifest = await buildLocalManifestV2(clientDir)
+	return JSON.stringify(manifest) + "\n"
 }
 
 async function collectFiles(rootDir: string): Promise<string[]> {
@@ -181,12 +237,90 @@ async function getFileSize(filePath: string): Promise<number> {
 	return stat.size
 }
 
+async function hashFileSha256(filePath: string): Promise<string> {
+	const content = await fs.readFile(filePath)
+	return createHash("sha256").update(content).digest("hex")
+}
+
 export function normalizeManifestPath(
 	baseDir: string,
 	absolutePath: string,
 ): string {
 	const relativePath = path.relative(baseDir, absolutePath)
 	return "./" + relativePath.split(path.sep).join("/")
+}
+
+export function detectAssetType(normalizedPath: string): string {
+	const extension = path.posix.extname(normalizedPath).toLowerCase()
+
+	if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+		return "js"
+	}
+	if (extension === ".css") return "css"
+	if (extension === ".map") return "sourcemap"
+	if (extension === ".html") return "html"
+	if (extension === ".json") return "json"
+	if (extension === ".wasm") return "wasm"
+	if (
+		extension === ".png" ||
+		extension === ".jpg" ||
+		extension === ".jpeg" ||
+		extension === ".gif" ||
+		extension === ".webp" ||
+		extension === ".avif" ||
+		extension === ".svg" ||
+		extension === ".ico"
+	) {
+		return "image"
+	}
+	if (
+		extension === ".woff" ||
+		extension === ".woff2" ||
+		extension === ".ttf" ||
+		extension === ".otf"
+	) {
+		return "font"
+	}
+	if (!extension) return "unknown"
+	return extension.slice(1)
+}
+
+export function inferOwnerGroup(normalizedPath: string): string {
+	const trimmed = normalizedPath.startsWith("./")
+		? normalizedPath.slice(2)
+		: normalizedPath
+	const segments = trimmed.toLowerCase().split("/")
+
+	if (
+		segments.includes("vendor") ||
+		segments.includes("node_modules") ||
+		segments.some((segment) => segment.startsWith("vendor-"))
+	) {
+		return "vendor"
+	}
+	if (
+		segments.includes("layouts") ||
+		segments.includes("layout") ||
+		segments.some((segment) => segment.startsWith("layout-"))
+	) {
+		return "layout"
+	}
+	if (
+		segments.includes("pages") ||
+		segments.includes("page") ||
+		segments.some((segment) => segment.startsWith("page-"))
+	) {
+		return "page"
+	}
+	if (
+		segments.includes("components") ||
+		segments.includes("component") ||
+		segments.some((segment) => segment.startsWith("component-"))
+	) {
+		return "component"
+	}
+
+	return "unknown"
 }
 
 function shellQuoteSingle(value: string): string {
@@ -245,6 +379,33 @@ async function loadRemoteManifest(
 	return { kind: "ok", content: contentResult.stdout }
 }
 
+export async function loadRemoteManifestV2(
+	sshConnectionString: string,
+	remoteManifestPath: string,
+	sshOpts: string[] = DEFAULT_SSH_OPTS,
+): Promise<TRemoteManifestV2Result> {
+	const raw = await loadRemoteManifest(
+		sshConnectionString,
+		remoteManifestPath,
+		sshOpts,
+	)
+
+	if (raw.kind !== "ok") {
+		return raw
+	}
+
+	try {
+		const manifest = parseChurnManifestV2Json(raw.content)
+		return { kind: "ok", manifest, content: raw.content }
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err)
+		return {
+			kind: "error",
+			reason: `Invalid churn manifest v2 format at ${remoteManifestPath}: ${message}`,
+		}
+	}
+}
+
 async function uploadRemoteManifest(
 	sshConnectionString: string,
 	remoteManifestPath: string,
@@ -280,6 +441,20 @@ async function uploadRemoteManifest(
 				`ssh exited with code ${String(result.code)} uploading manifest`,
 		)
 	}
+}
+
+export async function uploadRemoteManifestV2(
+	sshConnectionString: string,
+	remoteManifestPath: string,
+	manifestContent: string,
+	sshOpts: string[] = DEFAULT_SSH_OPTS,
+): Promise<void> {
+	await uploadRemoteManifest(
+		sshConnectionString,
+		remoteManifestPath,
+		manifestContent,
+		sshOpts,
+	)
 }
 
 function runSshCommand(
@@ -336,6 +511,10 @@ export function parseManifest(content: string): Map<string, number> {
 		map.set(filePath, size)
 	}
 	return map
+}
+
+export function parseManifestV2(content: string): TChurnManifestV2 {
+	return parseChurnManifestV2Json(content)
 }
 
 export function compareManifests(
