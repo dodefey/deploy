@@ -228,4 +228,118 @@ describe("buildChurnReport", () => {
 		expect(report.baseline.available).toBe(false)
 		expect(report.quality.warnings).toEqual([])
 	})
+
+	it("builds deterministic top offenders and attribution ordering", () => {
+		const oldManifest = buildManifest([])
+		const newManifest = buildManifest([
+			{
+				path: "./z.js",
+				size: 200,
+				sha256: "h-z",
+				assetType: "js",
+				ownerGroup: "beta",
+			},
+			{
+				path: "./a.js",
+				size: 200,
+				sha256: "h-a",
+				assetType: "js",
+				ownerGroup: "alpha",
+			},
+			{
+				path: "./mid.js",
+				size: 150,
+				sha256: "h-mid",
+				assetType: "js",
+				ownerGroup: "beta",
+			},
+			{
+				path: "./small.css",
+				size: 80,
+				sha256: "h-small-css",
+				assetType: "css",
+				ownerGroup: "alpha",
+			},
+			{
+				path: "./tiny.map",
+				size: 20,
+				sha256: "h-tiny-map",
+				assetType: "sourcemap",
+				ownerGroup: "alpha",
+			},
+			{
+				path: "./micro.json",
+				size: 10,
+				sha256: "h-micro-json",
+				assetType: "json",
+				ownerGroup: "beta",
+			},
+		])
+
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
+
+		const report = buildChurnReport({
+			metrics,
+			diagnosticsDiff: diff,
+			dryRun: false,
+			reportId: "report-sorting",
+			generatedAt: "2026-03-05T16:00:05Z",
+		})
+
+		expect(
+			report.diagnostics?.topOffenders?.newContentByBytes?.map(
+				(offender) => offender.path,
+			),
+		).toEqual(["./a.js", "./z.js", "./mid.js", "./small.css", "./tiny.map"])
+
+		expect(report.diagnostics?.attribution?.byOwnerGroup).toEqual([
+			{ key: "beta", files: 3, bytes: 360 },
+			{ key: "alpha", files: 3, bytes: 300 },
+		])
+	})
+
+	it("emits recommendations for dominant owner, sourcemaps, and unknown ownership", () => {
+		const oldManifest = buildManifest([])
+		const newManifest = buildManifest([
+			{
+				path: "./maps/app.js.map",
+				size: 300,
+				sha256: "h-map",
+				assetType: "sourcemap",
+				ownerGroup: "unknown",
+			},
+			{
+				path: "./chunks/app.js",
+				size: 100,
+				sha256: "h-js",
+				assetType: "js",
+				ownerGroup: "unknown",
+			},
+		])
+
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
+
+		const report = buildChurnReport({
+			metrics,
+			diagnosticsDiff: diff,
+			dryRun: false,
+			reportId: "report-recommendations",
+			generatedAt: "2026-03-05T16:00:06Z",
+		})
+
+		expect(report.diagnostics?.recommendations).toContain(
+			"New content dominates download impact. Focus on code-splitting and reducing fresh bundle bytes.",
+		)
+		expect(report.diagnostics?.recommendations).toContain(
+			'Most churn bytes are in owner group "unknown". Start optimization work there for fastest impact.',
+		)
+		expect(report.diagnostics?.recommendations).toContain(
+			"Sourcemaps contribute significant churn bytes. Consider excluding maps from deploy sync if production debugging allows.",
+		)
+		expect(report.diagnostics?.recommendations).toContain(
+			"A notable share of churn is unowned. Improve owner grouping rules to make diagnostics more actionable.",
+		)
+	})
 })
