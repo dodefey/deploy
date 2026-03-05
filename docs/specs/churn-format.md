@@ -2,7 +2,12 @@
 
 ## 1. Purpose
 
-The churn format helper is responsible for **turning raw churn metrics into a human-readable, multi-line summary string** suitable for CLI output.
+Formatting behavior is split across two helpers:
+
+- `src/churnFormat.ts`: core churn summary text from `TChurnMetrics`.
+- `src/churnDiagnosticsFormat.ts`: enhanced diagnostics rendering from `TChurnReportV1`.
+
+The core helper (`churnFormat`) is responsible for **turning raw churn metrics into a human-readable, multi-line summary string** suitable for CLI output.
 
 It answers:
 
@@ -69,7 +74,7 @@ export function formatChurnMetrics(
 ```
 
 - Input:
-    - `metrics`: the raw churn data returned by `computeClientChurn`.
+    - `metrics`: the raw churn data mapped from canonical report `core` metrics.
     - `options.dryRun`: whether the churn run is a dry run.
 
 - Output:
@@ -82,6 +87,30 @@ The function:
 
 - Does not mutate its inputs.
 - Does not perform any I/O.
+
+### 2.3 Diagnostics formatter API (`src/churnDiagnosticsFormat.ts`)
+
+```ts
+export type TChurnDiagnosticsOutputMode = "compact" | "full" | "json"
+
+export interface TChurnDiagnosticsFormatOptions {
+	mode?: TChurnDiagnosticsOutputMode
+	topN?: number
+}
+
+export function formatChurnReportDiagnostics(
+	report: TChurnReportV1,
+	options?: TChurnDiagnosticsFormatOptions,
+): string
+```
+
+Behavior:
+
+- `mode: "json"` returns pretty-printed report JSON.
+- `mode: "compact"` prints category totals and avoidable rename noise.
+- `mode: "full"` prints category totals, offenders, attribution, recommendations, warnings.
+- `topN` limits offenders printed per category in `full` mode.
+- If `report.diagnostics` is absent, formatter prints warning-oriented fallback text.
 
 ---
 
@@ -246,6 +275,12 @@ Rules:
 
 - Throws normal errors for invalid inputs.
 - No typed error codes.
+
+### 4.3 Diagnostics formatting compatibility notes
+
+- Diagnostics rendering is additive; core churn summary remains unchanged.
+- JSON mode is the stable machine-readable handoff path for external analysis.
+- If diagnostics data is unavailable in the report, the formatter must still return useful output that preserves core comparability context.
 
 ---
 

@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
 import { cli, define } from "gunshi"
+import { promises as fs } from "node:fs"
+import * as path from "node:path"
 import type { TBuildOutputMode } from "./build.js"
 import { runBuild } from "./build.js"
-import type { TChurnOptions } from "./churn.js"
-import { computeClientChurn } from "./churn.js"
+import type { TChurnMetrics } from "./churn.js"
+import { computeClientChurnReport } from "./churn.js"
+import { formatChurnReportDiagnostics } from "./churnDiagnosticsFormat.js"
+import type { TChurnReportV1 } from "./churnSchema.js"
 import type { TConfigErrorCode, TResolvedConfig } from "./config.js"
 import { listProfiles, resolveProfile } from "./config.js"
 import {
@@ -32,6 +36,7 @@ import { runTests } from "./test.js"
 
 const noop = (): void => {}
 let lastProfileUsed: string | undefined
+const DEFAULT_CHURN_HISTORY_OUT = ".deploy/churn-history.jsonl"
 
 interface TDeployArgs {
 	sshConnectionString: string
@@ -48,6 +53,16 @@ interface TDeployArgs {
 	verbose: boolean
 	churnOnly: boolean
 	profileName: string
+	churnDiagnostics?: TChurnDiagnosticsMode
+	churnTopN?: number
+	churnReportOut?: string
+	churnHistoryOut?: string
+	churnGroupRules?: Array<{ pattern: string; group: string }>
+}
+
+type TChurnDiagnosticsMode = "off" | "compact" | "full" | "json"
+type TResolvedConfigWithOptionalChurn = Omit<TResolvedConfig, "churn"> & {
+	churn?: TResolvedConfig["churn"]
 }
 
 const deployCommand = define({
@@ -135,6 +150,30 @@ const deployCommand = define({
 				"Run client churn analysis only (no build, no sync, no PM2; uses current buildDir)",
 			default: false,
 		},
+		churnDiagnostics: {
+			type: "string",
+			description:
+				"Churn diagnostics output mode (off, compact, full, json). Defaults to profile churn.diagnosticsDefault or off.",
+			default: undefined,
+		},
+		churnTopN: {
+			type: "string",
+			description:
+				"Top offenders count for churn diagnostics (positive integer). Defaults to profile churn.topN or 5.",
+			default: undefined,
+		},
+		churnReportOut: {
+			type: "string",
+			description:
+				'Optional churn report output destination: "stdout" or a file path.',
+			default: undefined,
+		},
+		churnHistoryOut: {
+			type: "string",
+			description:
+				'Churn history destination: "stdout", "off", or a JSONL file path (append mode). Defaults to .deploy/churn-history.jsonl; use "off" to disable.',
+			default: undefined,
+		},
 	},
 	run: async (ctx) => {
 		const values = ctx.values as {
@@ -149,6 +188,10 @@ const deployCommand = define({
 			skipBuild: boolean
 			verbose: boolean
 			churnOnly: boolean
+			churnDiagnostics?: string
+			churnTopN?: string
+			churnReportOut?: string
+			churnHistoryOut?: string
 			profile?: string
 		}
 
@@ -162,11 +205,14 @@ const deployCommand = define({
 				skipBuild: values.skipBuild,
 				verbose: values.verbose,
 				churnOnly: values.churnOnly,
+				churnDiagnostics: values.churnDiagnostics,
+				churnTopN: values.churnTopN,
+				churnReportOut: values.churnReportOut,
+				churnHistoryOut: values.churnHistoryOut,
 			})
 			lastProfileUsed = deploy.profileName
 		} catch (err) {
 			handleFatalError("Configuration", err, values.profile)
-			return
 		}
 
 		if (deploy.churnOnly) {
@@ -289,16 +335,8 @@ async function runPm2Phase(values: TDeployArgs): Promise<void> {
 
 async function runChurnPhase(values: TDeployArgs): Promise<void> {
 	logPhaseStart("Computing client churn metrics")
-	const options: TChurnOptions = {
-		buildDir: values.buildDir,
-		sshConnectionString: values.sshConnectionString,
-		remoteDir: values.remoteDir,
-		dryRun: values.dryRun,
-	}
-
 	try {
-		const metrics = await computeClientChurn(options)
-		logChurnSummary(metrics, { dryRun: values.dryRun })
+		await runChurnAnalysis(values, "deploy")
 		logPhaseSuccess("Client churn analysis complete.")
 	} catch (err) {
 		logNonFatalError("Client churn", err, {
@@ -310,20 +348,47 @@ async function runChurnPhase(values: TDeployArgs): Promise<void> {
 async function runChurnOnlyMode(values: TDeployArgs): Promise<void> {
 	logChurnOnlyStart({ profileName: values.profileName })
 	logPhaseStart("Computing client churn metrics")
-	const options: TChurnOptions = {
-		buildDir: values.buildDir,
-		sshConnectionString: values.sshConnectionString,
-		remoteDir: values.remoteDir,
-		dryRun: values.dryRun,
-	}
-
 	try {
-		const metrics = await computeClientChurn(options)
-		logChurnSummary(metrics, { dryRun: values.dryRun })
+		await runChurnAnalysis(values, "churnOnly")
 		logPhaseSuccess("Client churn analysis complete.")
 		logChurnOnlySuccess({ profileName: values.profileName })
 	} catch (err) {
 		handleFatalError("Client churn", err, values.profileName)
+	}
+}
+
+async function runChurnAnalysis(
+	values: TDeployArgs,
+	runMode: "deploy" | "churnOnly",
+): Promise<void> {
+	const mode = values.churnDiagnostics ?? "off"
+	const report = await computeClientChurnReport({
+		buildDir: values.buildDir,
+		sshConnectionString: values.sshConnectionString,
+		remoteDir: values.remoteDir,
+		dryRun: values.dryRun,
+		profileName: values.profileName,
+		runMode,
+		groupRules: values.churnGroupRules ?? [],
+	})
+
+	logChurnSummary(reportCoreToMetrics(report), { dryRun: values.dryRun })
+
+	if (mode !== "off") {
+		logPhaseSuccess(
+			formatChurnReportDiagnostics(report, {
+				mode,
+				topN: values.churnTopN,
+			}),
+		)
+	}
+
+	if (values.churnReportOut) {
+		await writeChurnReport(report, values.churnReportOut)
+	}
+
+	if (values.churnHistoryOut) {
+		await appendChurnHistory(report, values.churnHistoryOut)
 	}
 }
 
@@ -406,19 +471,30 @@ function applyOverrides(
 		pm2RestartMode: validatedRestartMode || config.pm2RestartMode,
 		buildCommand: config.buildCommand,
 		buildArgs: config.buildArgs,
+		churn: config.churn,
 	}
 }
 
 function buildDeployArgs(
-	merged: TResolvedConfig,
+	merged: TResolvedConfigWithOptionalChurn,
 	values: {
 		dryRun: boolean
 		skipTests: boolean
 		skipBuild: boolean
 		verbose: boolean
 		churnOnly: boolean
+		churnDiagnostics?: string
+		churnTopN?: string
+		churnReportOut?: string
+		churnHistoryOut?: string
 	},
 ): TDeployArgs {
+	const churnDefaults = merged.churn ?? {
+		diagnosticsDefault: "off" as const,
+		topN: 5,
+		groupRules: [],
+	}
+
 	return {
 		sshConnectionString: merged.sshConnectionString,
 		remoteDir: merged.remoteDir,
@@ -434,7 +510,153 @@ function buildDeployArgs(
 		verbose: values.verbose,
 		churnOnly: values.churnOnly,
 		profileName: merged.name,
+		churnDiagnostics: resolveChurnDiagnosticsMode(
+			values.churnDiagnostics,
+			churnDefaults.diagnosticsDefault,
+		),
+		churnTopN: resolveChurnTopN(values.churnTopN, churnDefaults.topN),
+		churnReportOut: normalizeChurnReportOut(values.churnReportOut),
+		churnHistoryOut: resolveChurnHistoryOut(
+			values.churnHistoryOut,
+			DEFAULT_CHURN_HISTORY_OUT,
+		),
+		churnGroupRules: churnDefaults.groupRules,
 	}
+}
+
+function resolveChurnDiagnosticsMode(
+	overrideValue: string | undefined,
+	defaultValue: TChurnDiagnosticsMode,
+): TChurnDiagnosticsMode {
+	if (!overrideValue) return defaultValue
+	const trimmed = overrideValue.trim()
+	if (
+		trimmed === "off" ||
+		trimmed === "compact" ||
+		trimmed === "full" ||
+		trimmed === "json"
+	) {
+		return trimmed
+	}
+	const err = new Error(
+		`Invalid churnDiagnostics value "${overrideValue}". Use off, compact, full, or json.`,
+	)
+	err.cause = "CONFIG_PROFILE_INVALID"
+	throw err
+}
+
+function resolveChurnTopN(
+	overrideValue: string | undefined,
+	defaultValue: number,
+): number {
+	if (!overrideValue) return defaultValue
+	const trimmed = overrideValue.trim()
+	const parsed = Number(trimmed)
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		const err = new Error(
+			`Invalid churnTopN value "${overrideValue}". Use a positive integer.`,
+		)
+		err.cause = "CONFIG_PROFILE_INVALID"
+		throw err
+	}
+	return parsed
+}
+
+function normalizeChurnReportOut(
+	value: string | undefined,
+): string | undefined {
+	if (!value) return undefined
+	const trimmed = value.trim()
+	return trimmed.length > 0 ? trimmed : undefined
+}
+
+function resolveChurnHistoryOut(
+	overrideValue: string | undefined,
+	defaultValue: string,
+): string | undefined {
+	if (!overrideValue) return defaultValue
+	const trimmed = overrideValue.trim()
+	if (trimmed.length === 0) return defaultValue
+	if (trimmed === "off") return undefined
+	return trimmed
+}
+
+function reportCoreToMetrics(report: TChurnReportV1): TChurnMetrics {
+	const { core } = report
+	return {
+		totalOldFiles: core.files.totalOld,
+		totalNewFiles: core.files.totalNew,
+		stableFiles: core.files.stable,
+		changedFiles: core.files.changed,
+		addedFiles: core.files.added,
+		removedFiles: core.files.removed,
+		totalOldBytes: core.bytes.totalOld,
+		totalNewBytes: core.bytes.totalNew,
+		stableBytes: core.bytes.stable,
+		changedBytes: core.bytes.changed,
+		addedBytes: core.bytes.added,
+		removedBytes: core.bytes.removed,
+		downloadImpactFilesPercent: core.percent.downloadImpactFiles,
+		cacheReuseFilesPercent: core.percent.cacheReuseFiles,
+		downloadImpactBytesPercent: core.percent.downloadImpactBytes,
+		cacheReuseBytesPercent: core.percent.cacheReuseBytes,
+	}
+}
+
+async function writeChurnReport(
+	report: TChurnReportV1,
+	output: string,
+): Promise<void> {
+	const content = JSON.stringify(report, null, 2) + "\n"
+	if (output === "stdout") {
+		logPhaseSuccess(content)
+		return
+	}
+	const outputPath = path.resolve(process.cwd(), output)
+	await fs.mkdir(path.dirname(outputPath), { recursive: true })
+	await fs.writeFile(outputPath, content, "utf8")
+	logPhaseSuccess(`Churn report written to ${outputPath}`)
+}
+
+async function appendChurnHistory(
+	report: TChurnReportV1,
+	output: string,
+): Promise<void> {
+	const diagnostics = report.diagnostics
+	const historyRecord = {
+		schema: "com.dodefey.churn-history-record",
+		schemaVersion: "1.0.0",
+		reportId: report.reportId,
+		generatedAt: report.generatedAt,
+		profile: report.run.profile,
+		mode: report.run.mode,
+		dryRun: report.run.dryRun,
+		baseline: report.baseline,
+		core: report.core,
+		diagnosticsSummary: diagnostics
+			? {
+					categories: diagnostics.categories,
+					renameNoiseBytes:
+						diagnostics.avoidableChurn?.renameNoiseBytes,
+					renameNoisePercentOfDownloadBytes:
+						diagnostics.avoidableChurn
+							?.renameNoisePercentOfDownloadBytes,
+				}
+			: undefined,
+		report,
+	}
+
+	const content = JSON.stringify(historyRecord) + "\n"
+
+	if (output === "stdout") {
+		logPhaseSuccess(content)
+		return
+	}
+
+	const outputPath = path.resolve(process.cwd(), output)
+	await fs.mkdir(path.dirname(outputPath), { recursive: true })
+	await fs.appendFile(outputPath, content, "utf8")
+	logPhaseSuccess(`Churn history appended to ${outputPath}`)
 }
 
 function handleFatalError(

@@ -2,14 +2,14 @@
 
 ## High-level goal
 
-Keep `src/cli.ts` a **high-level deploy story** so that:
+Keep `src/cli.ts` a high-level deploy story so that:
 
 - It reads as a **high-level deploy story** (tests → build → sync → pm2 → churn).
 - All detailed work is delegated to:
     - existing modules (`build`, `syncBuild`, `pm2`, `churn`)
     - a few small, well-named helpers in `src/cli.ts`.
-- Error handling is **centralized and consistent**.
-- There are **no behavioral changes** to deploy logic (same flags, same semantics, same exit behavior), only code organization and clarity improvements.
+- Error handling is centralized and consistent.
+- Legacy deploy behavior stays stable by default, while opt-in churn diagnostics/report features remain additive.
 
 ---
 
@@ -79,7 +79,7 @@ Use this `deploy` object for all subsequent calls in `src/cli.ts`.
 
 ### 2.1 Refactor helper signatures to use `TDeployArgs`
 
-Helpers should accept `TDeployArgs` instead of ad-hoc shapes (e.g. `runTestPhase`, `runBuildPhase`, `runSyncPhase`, `runPm2Phase`, `runChurnPhase`, `runChurnOnlyMode`). Inside each helper, destructure only what is needed and keep the module calls (`runTests`, `runBuild`, `syncBuild`, `updatePM2App`, `computeClientChurn`) unchanged aside from mapping fields.
+Helpers should accept `TDeployArgs` instead of ad-hoc shapes (e.g. `runTestPhase`, `runBuildPhase`, `runSyncPhase`, `runPm2Phase`, `runChurnPhase`, `runChurnOnlyMode`). Inside each helper, destructure only what is needed and keep the module calls (`runTests`, `runBuild`, `syncBuild`, `updatePM2App`, `computeClientChurnReport`) unchanged aside from mapping fields.
 
 ### 2.2 Add explicit phase helpers
 
@@ -115,7 +115,7 @@ async function runChurnOnlyMode(values: TDeployArgs): Promise<void> { ... }
     - On error, treat as **non-fatal**, via the new non-fatal error helper.
 
 - `runChurnPhase` (full deploy mode)
-    - Call `handleChurn(values)` (which wraps `computeClientChurn`) with the same options as before.
+    - Call `handleChurn(values)` (which wraps `computeClientChurnReport`) with the same options as before.
     - On error, treat as **non-fatal** (deploy still considered successful).
 
 - `runChurnOnlyMode`
@@ -240,11 +240,13 @@ try {
 
 ## 4. Constraints and non-goals
 
-- Do **not** change:
-    - CLI flags or their meanings.
-    - Behavior of `build`, `syncBuild`, `pm2`, or `churn` modules.
-    - Dry-run semantics.
-    - How churn metrics are computed or formatted, beyond moving formatting into helpers if needed.
+- Preserve default semantics:
+    - Existing build/sync/PM2/churn phase ordering.
+    - Fatal vs non-fatal phase behavior.
+
+- Churn diagnostics/report output behavior:
+    - CLI flags for diagnostics mode, top-N, report output, and history output stay supported.
+    - Churn computation always uses the canonical report path.
 
 - You **may**:
     - Move existing logic from `run()` into helpers.

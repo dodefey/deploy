@@ -1,83 +1,79 @@
 import { describe, expect, it } from "vitest"
 
-const modulePromise = import("../src/churn") as Promise<
-	typeof import("../src/churn")
->
+import {
+	buildRemoteManifestPath,
+	churnError,
+	compareManifestMetrics,
+	computeChurnFromManifests,
+	normalizeManifestPath,
+	parseManifest,
+} from "../src/churn"
+import {
+	CHURN_MANIFEST_SCHEMA,
+	CHURN_MANIFEST_SCHEMA_VERSION,
+	type TChurnManifest,
+	type TChurnManifestFile,
+} from "../src/churnSchema"
+
+function buildManifest(files: TChurnManifestFile[]): TChurnManifest {
+	return {
+		schema: CHURN_MANIFEST_SCHEMA,
+		schemaVersion: CHURN_MANIFEST_SCHEMA_VERSION,
+		generatedAt: "2026-03-05T16:00:00Z",
+		root: "public/_nuxt",
+		files,
+	}
+}
 
 describe("parseManifest", () => {
-	it("parses valid lines into path-size map", async () => {
-		const { parseManifest } = await modulePromise
-		const content = [
-			"100  ./a.js",
-			"200  ./b.css",
-			"300  ./nested/c.js",
-			"",
-		].join("\n")
-
-		const map = parseManifest(content)
-		expect(map.size).toBe(3)
-		expect(map.get("./a.js")).toBe(100)
-		expect(map.get("./b.css")).toBe(200)
-		expect(map.get("./nested/c.js")).toBe(300)
-	})
-
-	it("ignores empty and whitespace-only lines", async () => {
-		const { parseManifest } = await modulePromise
-		const content = "\n   \n100  ./a.js\n\n"
-		const map = parseManifest(content)
-		expect(map.size).toBe(1)
-		expect(map.get("./a.js")).toBe(100)
-	})
-
-	it("skips lines with invalid size", async () => {
-		const { parseManifest } = await modulePromise
-		const content = ["foo  ./a.js", "NaN  ./b.js", "50  ./c.js", ""].join(
-			"\n",
-		)
-		const map = parseManifest(content)
-		expect(map.size).toBe(1)
-		expect(map.get("./c.js")).toBe(50)
-	})
-
-	it("handles paths with spaces", async () => {
-		const { parseManifest } = await modulePromise
-		const content = "50  ./dir/with space/file.js\n"
-		const map = parseManifest(content)
-		expect(map.get("./dir/with space/file.js")).toBe(50)
-	})
-
-	it("handles trailing newlines without extra entries", async () => {
-		const { parseManifest } = await modulePromise
-		const content = "10  ./a.js\n20  ./b.js\n\n"
-		const map = parseManifest(content)
-		expect(map.size).toBe(2)
-		expect(map.get("./a.js")).toBe(10)
-		expect(map.get("./b.js")).toBe(20)
+	it("parses JSON manifest payload", () => {
+		const manifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "hash-a",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+		const parsed = parseManifest(JSON.stringify(manifest))
+		expect(parsed).toEqual(manifest)
 	})
 })
 
-describe("compareManifests", () => {
-	it("first deploy: all files added", async () => {
-		const { compareManifests } = await modulePromise
-		const newContent = [
-			"100  ./a.js",
-			"200  ./b.js",
-			"300  ./c.js",
-			"",
-		].join("\n")
-		const metrics = compareManifests("", newContent)
+describe("compareManifestMetrics", () => {
+	it("first deploy: all files added", () => {
+		const oldManifest = buildManifest([])
+		const newManifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "h-a",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./b.js",
+				size: 200,
+				sha256: "h-b",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
 		expect(metrics).toEqual({
 			totalOldFiles: 0,
-			totalNewFiles: 3,
+			totalNewFiles: 2,
 			stableFiles: 0,
 			changedFiles: 0,
-			addedFiles: 3,
+			addedFiles: 2,
 			removedFiles: 0,
 			totalOldBytes: 0,
-			totalNewBytes: 600,
+			totalNewBytes: 300,
 			stableBytes: 0,
 			changedBytes: 0,
-			addedBytes: 600,
+			addedBytes: 300,
 			removedBytes: 0,
 			downloadImpactFilesPercent: 100,
 			cacheReuseFilesPercent: 0,
@@ -86,179 +82,151 @@ describe("compareManifests", () => {
 		})
 	})
 
-	it("identical manifests: no churn", async () => {
-		const { compareManifests } = await modulePromise
-		const content = ["100  ./a.js", "200  ./b.js", "300  ./c.js", ""].join(
-			"\n",
-		)
-		const metrics = compareManifests(content, content)
-		expect(metrics).toEqual({
-			totalOldFiles: 3,
-			totalNewFiles: 3,
-			stableFiles: 3,
-			changedFiles: 0,
-			addedFiles: 0,
-			removedFiles: 0,
-			totalOldBytes: 600,
-			totalNewBytes: 600,
-			stableBytes: 600,
-			changedBytes: 0,
-			addedBytes: 0,
-			removedBytes: 0,
-			downloadImpactFilesPercent: 0,
-			cacheReuseFilesPercent: 100,
-			downloadImpactBytesPercent: 0,
-			cacheReuseBytesPercent: 100,
-		})
-	})
+	it("mixed stable/changed/added/removed scenario", () => {
+		const oldManifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "old-a",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./b.js",
+				size: 150,
+				sha256: "old-b",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./d.js",
+				size: 50,
+				sha256: "old-d",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+		const newManifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "new-a",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./b.js",
+				size: 200,
+				sha256: "new-b",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./c.js",
+				size: 300,
+				sha256: "new-c",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
 
-	it("mixed stable/changed/added/removed scenario", async () => {
-		const { compareManifests } = await modulePromise
-		const oldContent = [
-			"100  ./a.js",
-			"150  ./b.js",
-			"50  ./d.js",
-			"",
-		].join("\n")
-		const newContent = [
-			"100  ./a.js",
-			"200  ./b.js",
-			"300  ./c.js",
-			"",
-		].join("\n")
-		const metrics = compareManifests(oldContent, newContent)
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
 		expect(metrics).toEqual({
 			totalOldFiles: 3,
 			totalNewFiles: 3,
-			stableFiles: 1,
-			changedFiles: 1,
+			stableFiles: 0,
+			changedFiles: 2,
 			addedFiles: 1,
 			removedFiles: 1,
 			totalOldBytes: 300,
 			totalNewBytes: 600,
-			stableBytes: 100,
-			changedBytes: 200,
+			stableBytes: 0,
+			changedBytes: 300,
 			addedBytes: 300,
 			removedBytes: 50,
-			downloadImpactFilesPercent: ((1 + 1) * 100) / 3,
-			cacheReuseFilesPercent: (1 * 100) / 3,
-			downloadImpactBytesPercent: ((200 + 300) * 100) / 600,
-			cacheReuseBytesPercent: (100 * 100) / 600,
+			downloadImpactFilesPercent: ((2 + 1) * 100) / 3,
+			cacheReuseFilesPercent: (0 * 100) / 3,
+			downloadImpactBytesPercent: ((300 + 300) * 100) / 600,
+			cacheReuseBytesPercent: (0 * 100) / 600,
 		})
 	})
 
-	it("all files removed when new manifest empty", async () => {
-		const { compareManifests } = await modulePromise
-		const oldContent = [
-			"100  ./a.js",
-			"200  ./b.js",
-			"300  ./c.js",
-			"",
-		].join("\n")
-		const metrics = compareManifests(oldContent, "")
-		expect(metrics).toEqual({
-			totalOldFiles: 3,
-			totalNewFiles: 0,
-			stableFiles: 0,
-			changedFiles: 0,
-			addedFiles: 0,
-			removedFiles: 3,
-			totalOldBytes: 600,
-			totalNewBytes: 0,
-			stableBytes: 0,
-			changedBytes: 0,
-			addedBytes: 0,
-			removedBytes: 600,
-			downloadImpactFilesPercent: 0,
-			cacheReuseFilesPercent: 0,
-			downloadImpactBytesPercent: 0,
-			cacheReuseBytesPercent: 0,
-		})
-	})
+	it("treats same-size same-path hash changes as changed", () => {
+		const oldManifest = buildManifest([
+			{
+				path: "./same-size.js",
+				size: 128,
+				sha256: "old-hash",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+		const newManifest = buildManifest([
+			{
+				path: "./same-size.js",
+				size: 128,
+				sha256: "new-hash",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
 
-	it("only size changes, no added/removed paths", async () => {
-		const { compareManifests } = await modulePromise
-		const oldContent = ["100  ./a.js", "200  ./b.js", ""].join("\n")
-		const newContent = ["150  ./a.js", "250  ./b.js", ""].join("\n")
-		const metrics = compareManifests(oldContent, newContent)
-		expect(metrics).toEqual({
-			totalOldFiles: 2,
-			totalNewFiles: 2,
-			stableFiles: 0,
-			changedFiles: 2,
-			addedFiles: 0,
-			removedFiles: 0,
-			totalOldBytes: 300,
-			totalNewBytes: 400,
-			stableBytes: 0,
-			changedBytes: 400,
-			addedBytes: 0,
-			removedBytes: 0,
-			downloadImpactFilesPercent: 100,
-			cacheReuseFilesPercent: 0,
-			downloadImpactBytesPercent: 100,
-			cacheReuseBytesPercent: 0,
-		})
-	})
-
-	it("ignores malformed lines gracefully", async () => {
-		const { compareManifests } = await modulePromise
-		const oldContent = ["100  ./a.js", "foo  ./bad.js", ""].join("\n")
-		const newContent = ["100  ./a.js", "50  ./c.js", ""].join("\n")
-		const metrics = compareManifests(oldContent, newContent)
-		expect(metrics.totalOldFiles).toBe(1)
-		expect(metrics.totalNewFiles).toBe(2)
-		expect(metrics.addedFiles).toBe(1)
-		expect(metrics.removedFiles).toBe(0)
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
+		expect(metrics.stableFiles).toBe(0)
+		expect(metrics.changedFiles).toBe(1)
+		expect(metrics.stableBytes).toBe(0)
+		expect(metrics.changedBytes).toBe(128)
 	})
 })
 
 describe("computeChurnFromManifests", () => {
-	it('treats kind:"none" as empty old manifest', async () => {
-		const { computeChurnFromManifests, compareManifests } =
-			await modulePromise
-		const localContent = ["10  ./a.js", "20  ./b.js", ""].join("\n")
-		const expected = compareManifests("", localContent)
-		const metrics = computeChurnFromManifests(
-			{ kind: "none" },
-			localContent,
-		)
+	it("computes metrics from structured manifests", () => {
+		const previous = buildManifest([
+			{
+				path: "./old.js",
+				size: 5,
+				sha256: "old",
+				assetType: "js",
+				ownerGroup: "unknown",
+			},
+		])
+		const current = buildManifest([
+			{
+				path: "./old.js",
+				size: 6,
+				sha256: "new",
+				assetType: "js",
+				ownerGroup: "unknown",
+			},
+		])
+
+		const expected = compareManifestMetrics(previous, current)
+		const metrics = computeChurnFromManifests(previous, current)
 		expect(metrics).toEqual(expected)
 	})
 
-	it('passes through kind:"ok" content', async () => {
-		const { computeChurnFromManifests, compareManifests } =
-			await modulePromise
-		const oldContent = "5  ./old.js\n"
-		const newContent = "6  ./old.js\n"
-		const expected = compareManifests(oldContent, newContent)
-		const metrics = computeChurnFromManifests(
-			{ kind: "ok", content: oldContent },
-			newContent,
-		)
-		expect(metrics).toEqual(expected)
-	})
-
-	it("wraps compare failures with CHURN_COMPUTE_FAILED", async () => {
-		const { computeChurnFromManifests } = await modulePromise
-		let caught: any
+	it("wraps compare failures with CHURN_COMPUTE_FAILED", () => {
+		let caught: unknown
 		try {
 			computeChurnFromManifests(
-				// @ts-expect-error intentionally invalid inputs to force error path
-				{ kind: "ok", content: undefined },
+				// @ts-ignore intentionally invalid inputs
+				undefined,
+				// @ts-ignore intentionally invalid inputs
 				undefined,
 			)
 		} catch (err) {
 			caught = err
 		}
+
 		expect(caught).toBeInstanceOf(Error)
-		expect(caught?.cause).toBe("CHURN_COMPUTE_FAILED")
+		expect((caught as Error & { cause?: unknown }).cause).toBe(
+			"CHURN_COMPUTE_FAILED",
+		)
 	})
 })
 
 describe("churnError", () => {
-	it("sets cause and message", async () => {
-		const { churnError } = await modulePromise
+	it("sets cause and message", () => {
 		const err = churnError("CHURN_REMOTE_MANIFEST_FETCH_FAILED", "oops")
 		expect(err).toBeInstanceOf(Error)
 		expect(err.message).toBe("oops")
@@ -267,8 +235,7 @@ describe("churnError", () => {
 })
 
 describe("normalizeManifestPath", () => {
-	it('normalizes to "./relative/path" with forward slashes', async () => {
-		const { normalizeManifestPath } = await modulePromise
+	it('normalizes to "./relative/path" with forward slashes', () => {
 		const baseDir = "/root/app/.output/public/_nuxt"
 		const absolutePath = "/root/app/.output/public/_nuxt/dir/sub/file.js"
 		const normalized = normalizeManifestPath(baseDir, absolutePath)
@@ -277,10 +244,9 @@ describe("normalizeManifestPath", () => {
 })
 
 describe("buildRemoteManifestPath", () => {
-	it("builds path under .deploy", async () => {
-		const { buildRemoteManifestPath } = await modulePromise
+	it("builds path under .deploy", () => {
 		const remoteDir = "/var/www/test"
 		const pathBuilt = buildRemoteManifestPath(remoteDir)
-		expect(pathBuilt).toBe("/var/www/test/.deploy/manifest")
+		expect(pathBuilt).toBe("/var/www/test/.deploy/manifest.json")
 	})
 })

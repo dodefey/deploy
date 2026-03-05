@@ -4,5 +4,5 @@ dist
 coverage
 .env
 .DS_Store
-
+.deploy
 profiles.json

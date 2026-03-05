@@ -15,7 +15,7 @@ The deploy config module is the **single source of truth for environment-level d
 It does **not**:
 
 - Decide which profile to use for a given CLI run (that’s `src/cli.ts`).
-- Know about runtime flags like `dryRun`, `skipBuild`, `verbose`, `churnOnly`.
+- Know about runtime flags like `dryRun`, `skipBuild`, `verbose`, `churnOnly`, `churnDiagnostics`, `churnTopN`, or `churnReportOut`.
 - Read from `.env` or environment variables in this initial version.
 
 ## 2. Scope and Non-Goals
@@ -54,6 +54,16 @@ export interface TProfile {
 	// Build command configuration (required; no defaults applied here)
 	buildCommand?: string
 	buildArgs?: string[]
+
+	// Optional churn defaults for CLI/runtime wiring
+	churn?: {
+		diagnosticsDefault?: "off" | "compact" | "full" | "json"
+		topN?: number
+		groupRules?: Array<{
+			pattern: string
+			group: string
+		}>
+	}
 }
 ```
 
@@ -76,6 +86,14 @@ export interface TResolvedConfig {
 	pm2RestartMode: "startOrReload" | "reboot"
 	buildCommand: string
 	buildArgs: string[]
+	churn: {
+		diagnosticsDefault: "off" | "compact" | "full" | "json"
+		topN: number
+		groupRules: Array<{
+			pattern: string
+			group: string
+		}>
+	}
 }
 ```
 
@@ -149,10 +167,16 @@ Steps:
 2. Apply defaults:
     - `buildDir = profile.buildDir ?? ".output"`
     - `pm2RestartMode = profile.pm2RestartMode ?? "startOrReload"`
+    - `churn.diagnosticsDefault = profile.churn?.diagnosticsDefault ?? "off"`
+    - `churn.topN = profile.churn?.topN ?? 5`
+    - `churn.groupRules = profile.churn?.groupRules ?? []`
 3. Validate required fields:
     - Required strings: `sshConnectionString`, `remoteDir`, `env`, `pm2AppName` → non-empty after trimming, else `CONFIG_PROFILE_INVALID`.
     - Build command: `buildCommand` must be a non-empty string; missing/whitespace → `CONFIG_PROFILE_INVALID`.
     - Build args: `buildArgs` must be a non-empty string array; missing/empty/non-string/whitespace entries → `CONFIG_PROFILE_INVALID`.
+    - Churn diagnostics default, if provided, must be one of: `off`, `compact`, `full`, `json`.
+    - `churn.topN`, if provided, must be a positive integer.
+    - `churn.groupRules`, if provided, must be an array of `{ pattern, group }` with non-empty strings.
     - Profile names must be unique; enforce uniqueness once at load time.
     - Optional string fields, if provided, must be non-empty after trimming; otherwise defaults apply.
 4. Return resolved config including `buildCommand` and `buildArgs`.
@@ -170,6 +194,7 @@ return {
 	pm2RestartMode,
 	buildCommand: profile.buildCommand,
 	buildArgs: profile.buildArgs,
+	churn,
 }
 ```
 
@@ -191,6 +216,7 @@ function configError(code: TConfigErrorCode, message: string): Error {
 - Duplicate profile names detected at load → `CONFIG_DUPLICATE_PROFILE`
 - Missing/empty required profile fields (sshConnectionString, remoteDir, env, pm2AppName) → `CONFIG_PROFILE_INVALID`
 - Missing/invalid buildCommand or buildArgs → `CONFIG_PROFILE_INVALID`
+- Invalid `churn` shape/values → `CONFIG_PROFILE_INVALID`
 - Invalid pm2RestartMode → `CONFIG_INVALID_RESTART_MODE`
 
 ## 7. Interaction with src/cli.ts

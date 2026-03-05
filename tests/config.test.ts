@@ -123,6 +123,102 @@ describe("config module", () => {
 		expect(resolved.pm2RestartMode).toBe("startOrReload")
 		expect(resolved.buildCommand).toBe("npx")
 		expect(resolved.buildArgs).toEqual(["nuxt", "build"])
+		expect(resolved.churn).toEqual({
+			diagnosticsDefault: "off",
+			topN: 5,
+			groupRules: [],
+		})
+	})
+
+	it("resolves optional churn config with validated values", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				churn: {
+					diagnosticsDefault: "full",
+					topN: 10,
+					groupRules: [
+						{ pattern: "vendor/**", group: "vendor" },
+						{ pattern: "pages/**", group: "page" },
+					],
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+
+		const resolved = resolveProfile("prod")
+		expect(resolved.churn).toEqual({
+			diagnosticsDefault: "full",
+			topN: 10,
+			groupRules: [
+				{ pattern: "vendor/**", group: "vendor" },
+				{ pattern: "pages/**", group: "page" },
+			],
+		})
+	})
+
+	it("throws CONFIG_PROFILE_INVALID for invalid churn diagnosticsDefault", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				churn: {
+					// @ts-expect-error intentional invalid value for validation test
+					diagnosticsDefault: "verbose",
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
+	})
+
+	it("throws CONFIG_PROFILE_INVALID for invalid churn.topN", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				churn: {
+					topN: 0,
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
+	})
+
+	it("throws CONFIG_PROFILE_INVALID for malformed churn.groupRules", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				churn: {
+					groupRules: [{ pattern: "vendor/**", group: "   " }],
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
 	})
 
 	it("validates all required fields for a matching profile", () => {

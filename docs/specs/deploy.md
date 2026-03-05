@@ -1,358 +1,177 @@
-# deployLogging Module Specification
+# Deploy Orchestrator Specification (`src/cli.ts`)
 
 ## 1. Purpose
 
-The `deployLogging` module centralizes **all logging behavior** for the deploy CLI.
+`src/cli.ts` is the deploy orchestrator. It is responsible for:
 
-It is responsible for:
+- Parsing CLI flags.
+- Resolving a deploy profile and applying runtime overrides.
+- Executing phases in order (tests, build, sync, PM2, churn).
+- Enforcing fatal vs non-fatal phase semantics.
+- Delegating human-facing logs to `src/deployLogging.ts`.
 
-- Turning deploy events and errors into **human-readable log lines**.
-- Sending those lines to a **pluggable logging sink** (default: console).
-- Enforcing the **logging and error format contracts** defined in the logging and error taxonomy specs.
-
-It does **not**:
-
-- Decide exit codes (`process.exit` never appears here).
-- Orchestrate phases (build/sync/PM2/churn); that stays in `main.ts`.
-- Perform network, filesystem, or deploy logic.
-
-`main.ts` should not call `console.log`/`console.error` directly.  
-Instead, it calls functions in `deployLogging`, which handle both formatting and output.
+It does not implement build/sync/PM2/churn internals; those stay in their modules.
 
 ---
 
-## 2. Logger Sink Abstraction
+## 2. Command Surface
 
-### 2.1 TLoggerSink
+Main command: `deploy`
 
-```ts
-export interface TLoggerSink {
-	info(line: string): void
-	error(line: string): void
-}
-```
+Supported flags:
 
-### 2.2 Default sink
-
-```ts
-const consoleSink: TLoggerSink = {
-	info: (line) => console.log(line),
-	error: (line) => console.error(line),
-}
-```
-
-### 2.3 Current sink and setter
-
-```ts
-let currentSink: TLoggerSink = consoleSink
-
-export function setLoggerSink(sink: TLoggerSink | null | undefined): void
-```
-
-Behavior:
-
-- If `sink` is valid, use it.
-- If `null` or `undefined`, reset to `consoleSink`.
+- `--profile, -p <name>`
+- `--sshConnectionString, -s <target>`
+- `--remoteDir, -d <path>`
+- `--buildDir, -b <path>`
+- `--env, -e <name>`
+- `--pm2AppName <name>`
+- `--pm2RestartMode <startOrReload|reboot>`
+- `--skipTests, -T`
+- `--dryRun, -n`
+- `--skipBuild, -k`
+- `--verbose, -V`
+- `--churnOnly, -c`
+- `--churnDiagnostics <off|compact|full|json>`
+- `--churnTopN <positive integer>`
+- `--churnReportOut <stdout|path>`
+- `--churnHistoryOut <stdout|off|path>`
 
 ---
 
-## 3. Context Types
+## 3. Config and Argument Resolution
 
-```ts
-export interface TLogContext {
-	profileName?: string
-}
+### 3.1 Profile selection
 
-export interface TPm2Context extends TLogContext {
-	appName: string
-	restartMode: "startOrReload" | "reboot"
-	instanceCount: number
-}
-```
+- `--profile` is required; no implicit default profile.
+- Profile data is resolved via `resolveProfile`.
+- Optional runtime overrides are applied via `applyOverrides`.
 
----
+### 3.2 Deploy context
 
-## 4. Error Interpretation Utilities
+Resolved values are normalized into `TDeployArgs`, including:
 
-### 4.1 extractErrorCode
+- Connection/build/runtime values.
+- Runtime flags.
+- Churn diagnostics options (`churnDiagnostics`, `churnTopN`, `churnReportOut`, `churnHistoryOut`).
 
-```ts
-export function extractErrorCode(err: unknown): string | undefined
-```
+### 3.3 Churn defaults
 
-Rules:
+If CLI churn options are not provided:
 
-- Return `err.cause` if it exists and is a string.
-- Else return `undefined`.
+- `churnDiagnostics` defaults to profile `churn.diagnosticsDefault` (or `off`).
+- `churnTopN` defaults to profile `churn.topN` (or `5`).
+- `churnReportOut` defaults to undefined.
+- `churnHistoryOut` defaults to `.deploy/churn-history.jsonl` and may be disabled with `off`.
 
-### 4.2 toErrorMessage
-
-```ts
-export function toErrorMessage(err: unknown): string
-```
-
-Rules:
-
-- If `Error`, return `message`.
-- Else `String(err)`.
+Invalid churn option values are treated as config-invalid errors (`CONFIG_PROFILE_INVALID`).
 
 ---
 
-## 5. Error Formatting Helpers (Pure)
+## 4. Phase Flow
 
-### 5.1 formatFatalError
+### 4.1 Full deploy mode
 
-```ts
-export function formatFatalError(
-	label: string,
-	code: string | undefined,
-	message: string,
-	profileName?: string,
-): string
-```
+Execution order:
 
-Rules:
+1. `runTestPhase`
+2. `runBuildPhase`
+3. `runSyncPhase`
+4. `runPm2Phase`
+5. `runChurnPhase`
 
-- With code + profile:
+### 4.2 Churn-only mode
 
-    ```
-    <label> error [<CODE>] (profile="<PROFILE_NAME>"): <message>
-    ```
+If `--churnOnly` is set:
 
-- With code only:
-
-    ```
-    <label> error [<CODE>]: <message>
-    ```
-
-- With profile only:
-
-    ```
-    <label> error (profile="<PROFILE_NAME>"): <message>
-    ```
-
-- With neither:
-
-    ```
-    <label> error: <message>
-    ```
-
-### 5.2 formatNonFatalError
-
-```ts
-export function formatNonFatalError(
-	label: string,
-	code: string | undefined,
-	message: string,
-	profileName?: string,
-): string
-```
-
-Rules:
-
-- With code + profile:
-
-    ```
-    Deploy succeeded, but <label> step failed [<CODE>] (profile="<PROFILE_NAME>"): <message>
-    ```
-
-- With code only:
-
-    ```
-    Deploy succeeded, but <label> step failed [<CODE>]: <message>
-    ```
-
-- With profile only:
-
-    ```
-    Deploy succeeded, but <label> step failed (profile="<PROFILE_NAME>"): <message>
-    ```
-
-- With neither:
-
-    ```
-    Deploy succeeded, but <label> step failed: <message>
-    ```
+- Skip test/build/sync/PM2 phases.
+- Run `runChurnOnlyMode`.
 
 ---
 
-## 6. Public Logging API (Used by main.ts)
+## 5. Phase Behavior
 
-### 6.1 Deploy lifecycle logs
+### 5.1 Tests
 
-```ts
-export function logDeployStart(ctx: TLogContext): void
-export function logDeploySuccess(ctx: TLogContext): void
-export function logChurnOnlyStart(ctx: TLogContext): void
-export function logChurnOnlySuccess(ctx: TLogContext): void
-```
+- Logs phase start.
+- Skips when `skipTests` is true.
+- Uses `runTests` with `inherit` output mode when verbose, otherwise callback/no-op wiring.
+- Failure is fatal.
 
-Behavior:
+### 5.2 Build
 
-- logDeployStart:
+- Logs phase start.
+- Skips when `skipBuild` is true.
+- Uses profile-defined `buildCommand`/`buildArgs`.
+- Uses `inherit` output mode when verbose, otherwise callback/no-op wiring.
+- Failure is fatal.
 
-    ```
-    [deploy] Starting deploy for profile "<PROFILE_NAME>"...
-    ```
+### 5.3 Sync
 
-- logDeploySuccess:
+- Uses `syncBuild` with resolved paths and `dryRun`.
+- Uses `inherit` output mode when verbose, otherwise callback/no-op wiring.
+- Failure is fatal.
 
-    ```
-    [deploy] Deploy completed successfully for profile "<PROFILE_NAME>".
-    ```
+### 5.4 PM2
 
-- logChurnOnlyStart:
+- Skips remote update when `dryRun` is true.
+- Uses `updatePM2App` otherwise.
+- `PM2_APP_NAME_NOT_FOUND` is fatal.
+- Other PM2 failures are non-fatal and logged as degraded-success.
 
-    ```
-    [deploy] Starting churn-only run for profile "<PROFILE_NAME>"...
-    ```
+### 5.5 Churn (shared logic)
 
-- logChurnOnlySuccess:
+`runChurnAnalysis` uses a single canonical churn path:
 
-    ```
-    [deploy] Churn-only run completed successfully for profile "<PROFILE_NAME>".
-    ```
+- Calls `computeClientChurnReport`.
+- Logs churn summary derived from report `core`.
+- Emits diagnostics text/json when diagnostics mode is not `off`.
+- Writes report JSON when `churnReportOut` is set (`stdout` or file path).
+- Appends churn history JSONL when `churnHistoryOut` is enabled (`stdout` or file path); each history record includes the full canonical churn report payload for downstream analysis.
 
-Fallback if no profileName:
+### 5.6 Churn fatality rules
 
-```
-[deploy] Starting deploy...
-[deploy] Deploy completed successfully.
-[deploy] Starting churn-only run...
-[deploy] Churn-only run completed successfully.
-```
-
----
-
-### 6.2 Phase progress logs
-
-```ts
-export function logPhaseStart(name: string): void
-export function logPhaseSuccess(message: string): void
-```
-
-- logPhaseStart:
-
-    ```
-    [deploy] <name>...
-    ```
-
-- logPhaseSuccess:
-
-    ```
-    [deploy] <message>
-    ```
+- Full deploy churn failures are non-fatal.
+- Churn-only failures are fatal.
 
 ---
 
-### 6.3 PM2 success logs
+## 6. Logging Contract
 
-```ts
-export function logPm2Success(ctx: TPm2Context): void
-```
+`src/cli.ts` does not emit direct console logs for deploy events. It uses `src/deployLogging.ts` APIs:
 
-Expected output:
-
-```
-[deploy] PM2 update complete for "<APP_NAME>": <INSTANCE_COUNT> instances online (mode: <RESTART_MODE>).
-```
+- lifecycle logs (`logDeployStart`, `logDeploySuccess`, churn-only equivalents)
+- phase logs (`logPhaseStart`, `logPhaseSuccess`)
+- PM2 success log (`logPm2Success`)
+- churn summary (`logChurnSummary`)
+- fatal and non-fatal error logs
 
 ---
 
-### 6.4 Churn summary logs
+## 7. Exit Semantics
 
-```ts
-export function logChurnSummary(
-	metrics: TChurnMetrics,
-	options?: TChurnDisplayOptions,
-): void
-```
+- Fatal phases (config/tests/build/sync/churn-only) exit with code `1`.
+- Non-fatal phases (PM2/churn in full deploy) do not change successful exit code.
+- `main()` exits `0` on successful command completion and `1` on unexpected top-level errors.
 
-Behavior:
-
-- Format using `formatChurnMetrics`.
-- Output using `currentSink.info`.
+See `docs/specs/exit-semantics.md` for full rules.
 
 ---
 
-### 6.5 Error logs
+## 8. Churn Contract
 
-#### logFatalError
-
-```ts
-export function logFatalError(
-	label: string,
-	err: unknown,
-	ctx?: TLogContext,
-): void
-```
-
-Steps:
-
-1. Extract code and message.
-2. Format using `formatFatalError`.
-3. Log via `currentSink.error`.
-
-No exit.
-
-#### logNonFatalError
-
-```ts
-export function logNonFatalError(
-	label: string,
-	err: unknown,
-	ctx?: TLogContext,
-): void
-```
-
-Steps:
-
-1. Extract code and message.
-2. Format using `formatNonFatalError`.
-3. Log via `currentSink.error`.
-
-No exit.
+- Churn always computes canonical report data.
+- Summary output always comes from report `core`.
+- Diagnostics display remains optional via `churnDiagnostics`.
+- Full report output is optional via `churnReportOut`.
+- JSONL history output is enabled by default via `churnHistoryOut` unless explicitly set to `off`.
 
 ---
 
-## 7. Integration Rules for main.ts
+## 9. Related Specs
 
-After this module is implemented:
-
-- **main.ts must never call** `console.log` or `console.error` directly.
-- All logging goes through:
-    - logDeployStart / logDeploySuccess
-    - logChurnOnlyStart / logChurnOnlySuccess
-    - logPhaseStart / logPhaseSuccess
-    - logPm2Success
-    - logChurnSummary
-    - logFatalError / logNonFatalError
-- Fatal exit remains in main:
-
-```ts
-function handleFatalError(label, err, profileName): never {
-	logFatalError(label, err, { profileName })
-	process.exit(1)
-}
-```
-
----
-
-## 8. Testability
-
-- Formatters have pure snapshot tests.
-- Logging functions can be tested using a custom sink via `setLoggerSink`.
-- No filesystem or network dependencies.
-- No side effects beyond the sink.
-
----
-
-## 9. Future Extensions
-
-- Optional debug/warn levels.
-- Optional structured logging sink (e.g. pino).
-- Optional inclusion of env/dryRun flags in context.
-
-For now, the module is strictly:
-
-> “Format and log all deploy-related messages through a pluggable sink without deciding exit behavior.”
+- `docs/specs/orchestrator-spec.md`
+- `docs/specs/logging.md`
+- `docs/specs/exit-semantics.md`
+- `docs/specs/churn.md`
+- `docs/specs/config.md`

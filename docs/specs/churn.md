@@ -2,156 +2,142 @@
 
 ## 1. Purpose
 
-The churn module measures **client-bundle cache impact** for returning users after a deploy.
-It answers:
+The churn module computes deploy-to-deploy client cache impact and produces a canonical churn report.
 
-- **How much of the new bundle can be reused from browser cache?**
-- **How much must be downloaded again, in files and bytes?**
+It exposes one compute entrypoint:
 
-This expresses the _real-world impact_ of a deploy on repeat visitors.
+- `computeClientChurnReport(opts)`
 
-The comparison is based on **file URLs (paths)** and **file sizes**, matching how browsers actually cache fingerprinted assets.
+## 2. Manifest Input and Location
 
----
+Local source assets are read from:
 
-## 2. Manifest Format
-
-Manifests represent all client bundle assets and encode only the necessary data:
-
-```
-<size>  ./relative/path/to/asset.js
-```
-
-Properties:
-
-- **File identity = URL (path)**  
-  Nuxt filenames are already content-hashed, so filenames uniquely identify versions.
-- **Size included** for byte-impact analysis.
-- **Sorted lexicographically**, newline-separated.
-- Always ends with a newline when non-empty.
-
----
-
-## 3. Manifest Locations
-
-### Local manifest
-
-Generated from:
-
-```
+```txt
 buildDir/public/_nuxt
 ```
 
-### Remote manifest
+Remote baseline path:
 
-Stored at:
+- `${remoteDir}/.deploy/manifest.json`
 
-```
-remoteDir/.deploy/manifest
-```
+The manifest is kept under `.deploy/` so it is not removed by bundle sync operations.
 
-Reasoning:
+## 3. Manifest Model
 
-- Must **persist across deploys**.
-- Must **not** live inside `.output`, because rsync wipes that directory.
-- Stored in a dedicated deploy metadata directory.
+Manifest schema is JSON (`com.dodefey.churn-manifest`, `1.x`) with per-file records:
 
----
+- `path`
+- `size`
+- `sha256`
+- `assetType`
+- `ownerGroup`
 
-## 4. Churn Metrics
+Schema parsing and validation are defined in `src/churnSchema.ts`.
 
-Churn is computed with both **file counts** and **byte counts**.
+## 4. Core Metrics Model
 
-### 4.1 File counts
+Core metrics are derived from path+size comparisons between previous and current manifests:
 
-- `totalOldFiles`
-- `totalNewFiles`
-- `stableFiles`
-- `changedFiles`
-- `addedFiles`
-- `removedFiles`
+- File totals: old/new/stable/changed/added/removed
+- Byte totals: old/new/stable/changed/added/removed
+- Percentages:
+    - download impact / cache reuse by files
+    - download impact / cache reuse by bytes
 
-### 4.2 Byte counts
+## 5. Diagnostics Categories
 
-- `totalOldBytes`
-- `totalNewBytes`
-- `stableBytes`
-- `changedBytes`
-- `addedBytes`
-- `removedBytes`
+Diagnostics are always computed from hash-aware manifest diff:
 
-### 4.3 Percentages
+- `reused_exact`
+- `changed_same_path`
+- `renamed_same_hash`
+- `new_content`
+- `removed`
 
-#### File-based:
+Report diagnostics also include avoidable rename noise totals.
 
-- `downloadImpactFilesPercent = (changedFiles + addedFiles) / totalNewFiles * 100`
-- `cacheReuseFilesPercent = stableFiles / totalNewFiles * 100`
+## 6. Public APIs
 
-#### Byte-based:
+### 6.1 `computeClientChurnReport(opts)`
 
-- `downloadImpactBytesPercent = (changedBytes + addedBytes) / totalNewBytes * 100`
-- `cacheReuseBytesPercent = stableBytes / totalNewBytes * 100`
+Behavior:
 
----
+1. Build local manifest JSON.
+2. Load remote manifest JSON baseline if present.
+3. Compute core metrics from previous/current manifests.
+4. Compute diagnostics diff categories.
+5. Build `TChurnReportV1` payload.
+6. Upload updated manifest baseline unless `dryRun`.
 
-## 5. Comparison Rules
+If the baseline file is missing, the run proceeds with an empty previous manifest.
 
-- **added** → path not in old manifest
-- **removed** → path not in new manifest
-- **stable** → same path, same size
-- **changed** → same path, different size
+## 7. Report Contract (`TChurnReportV1`)
 
----
+Report includes:
 
-## 6. computeClientChurn Behavior
+- `schema`, `schemaVersion`, `metricSetVersion`, `reportId`, `generatedAt`
+- `producer`, `run`, `baseline`
+- `capabilities`
+- `core`
+- `diagnostics`
+- `quality`
 
-1. Compute local manifest.
-2. Load remote manifest (missing = baseline miss).
-3. Compare manifests.
-4. If `dryRun === false`, upload updated manifest.
-5. Return churn metrics.
+Current capability/class values:
 
-Dry-run still computes churn but does _not_ upload a manifest.
+- `renameDetection: "hash-match"`
+- `assetTyping: "extension"`
+- `ownerGrouping: "heuristic"`
+- `quality.comparableClass: "core-1+hash"`
 
----
+## 8. Error Model
 
-## 7. Error Model
+Typed churn errors (`Error.cause`):
 
-Errors use `.cause` with the following codes:
-
+- `CHURN_NO_CLIENT_DIR`
 - `CHURN_REMOTE_MANIFEST_FETCH_FAILED`
 - `CHURN_REMOTE_MANIFEST_UPLOAD_FAILED`
 - `CHURN_COMPUTE_FAILED`
-- `CHURN_NO_CLIENT_DIR` (if thrown, see taxonomy)
 
-Notes:
+## 9. Output Contract
 
-- If a “no client dir” condition needs to be represented, use `CHURN_NO_CLIENT_DIR` consistently across taxonomy, spec, and implementation.
+`src/churn.ts` performs no direct console logging.
 
----
+- Human-facing summary formatting: `src/churnFormat.ts`
+- Diagnostics formatting: `src/churnDiagnosticsFormat.ts`
+- Report/history output routing is handled by `src/cli.ts` (`--churnReportOut`, `--churnHistoryOut`).
+- History records include the full canonical churn report payload to support post-run analysis workflows.
 
-## 8. SSH Behavior
+## 10. Operational Guidance
 
-- Uses hardened SSH options.
-- Safe quoting for remote paths.
-- Uses `test -f` to detect existence.
-- Resolves command result **exactly once**.
+### 10.1 Baseline lifecycle
 
----
+- Remote baseline file is `${remoteDir}/.deploy/manifest.json`.
+- First non-dry run creates the baseline.
+- Dry-runs do not update baseline data.
+- Subsequent runs compare current manifest against the baseline.
 
-## 9. Module Design Principles
+### 10.2 Environment checks
 
-- Pure library (no console I/O).
-- Deterministic outputs.
-- Clean manifest pipeline.
-- Survives rsync wipes.
+Per environment:
 
----
+1. Confirm deploy runner can read/write `${remoteDir}/.deploy/`.
+2. Confirm first non-dry run creates `${remoteDir}/.deploy/manifest.json`.
+3. Confirm the next run reports `baseline.available=true`.
+4. If `--churnReportOut` is used, confirm artifact retention policy is in place.
+5. Confirm churn history destination behavior:
+    - default `.deploy/churn-history.jsonl` appends per run
+    - `--churnHistoryOut off` disables history writes
+    - `--churnHistoryOut stdout` emits JSONL to stdout
 
-## 10. Output Format
+### 10.3 Failure handling
 
-```
-Client cache impact
-  Files: X.X% need (re)download (...)
-  Bytes: X.X% need (re)download (...)
-```
+- Missing baseline file is treated as empty previous state.
+- Invalid/unreadable baseline file fails churn with a typed churn error.
+- In full deploy mode, churn failure is non-fatal at orchestrator level.
+- In `--churnOnly` mode, churn failure is fatal.
+
+### 10.4 Schema/report evolution
+
+- Keep additive manifest/report changes within current major versions.
+- Bump major versions only for breaking shape or semantic changes.
+- Keep report core metric semantics stable for trend continuity.
