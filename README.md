@@ -91,7 +91,7 @@ Flags (from `src/cli.ts`):
 Churn output notes:
 
 - `--churnReportOut` writes the full canonical report (`TChurnReportV1`).
-- `--churnHistoryOut` appends one JSONL history record per run.
+- `--churnHistoryOut` appends one JSONL history record per run, including the full canonical report payload under `report` (plus summary fields for quick scans).
 - If omitted, history defaults to `.deploy/churn-history.jsonl`.
 
 Example:

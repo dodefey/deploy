@@ -643,6 +643,7 @@ async function appendChurnHistory(
 							?.renameNoisePercentOfDownloadBytes,
 				}
 			: undefined,
+		report,
 	}
 
 	const content = JSON.stringify(historyRecord) + "\n"

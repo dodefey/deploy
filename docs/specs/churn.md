@@ -105,6 +105,7 @@ Typed churn errors (`Error.cause`):
 - Human-facing summary formatting: `src/churnFormat.ts`
 - Diagnostics formatting: `src/churnDiagnosticsFormat.ts`
 - Report/history output routing is handled by `src/cli.ts` (`--churnReportOut`, `--churnHistoryOut`).
+- History records include the full canonical churn report payload to support post-run analysis workflows.
 
 ## 10. Operational Guidance
 

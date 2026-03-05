@@ -1304,10 +1304,15 @@ describe("src/cli.ts wiring", () => {
 		})
 
 		expect(computeReportMock).toHaveBeenCalled()
-		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
-			expect.stringContaining(
-				'"schema":"com.dodefey.churn-history-record"',
-			),
-		)
+			expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
+				expect.stringContaining(
+					'"schema":"com.dodefey.churn-history-record"',
+				),
+			)
+			expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
+				expect.stringContaining(
+					'"report":{"schema":"com.dodefey.churn-report"',
+				),
+			)
+		})
 	})
-})

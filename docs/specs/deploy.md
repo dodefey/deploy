@@ -127,7 +127,7 @@ If `--churnOnly` is set:
 - Logs churn summary derived from report `core`.
 - Emits diagnostics text/json when diagnostics mode is not `off`.
 - Writes report JSON when `churnReportOut` is set (`stdout` or file path).
-- Appends churn history JSONL when `churnHistoryOut` is enabled (`stdout` or file path).
+- Appends churn history JSONL when `churnHistoryOut` is enabled (`stdout` or file path); each history record includes the full canonical churn report payload for downstream analysis.
 
 ### 5.6 Churn fatality rules
 
