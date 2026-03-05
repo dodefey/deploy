@@ -958,6 +958,54 @@ describe("src/cli.ts wiring", () => {
 		)
 	})
 
+	it("runChurnPhase forwards configured churnGroupRules", async () => {
+		const computeReportMock = vi
+			.fn()
+			.mockResolvedValue(buildReportFixture())
+		const { logFns } = setupMocks({
+			computeClientChurnReportImpl: computeReportMock,
+		})
+		const { __test__ } = await importMain()
+
+		await __test__.runChurnPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			profileName: "p",
+			churnDiagnostics: "off",
+			churnGroupRules: [
+				{ pattern: "components/**", group: "ui" },
+				{ pattern: "vendor", group: "third-party" },
+			],
+		})
+
+		expect(computeReportMock).toHaveBeenCalledWith({
+			buildDir: "/b",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			dryRun: false,
+			profileName: "p",
+			runMode: "deploy",
+			groupRules: [
+				{ pattern: "components/**", group: "ui" },
+				{ pattern: "vendor", group: "third-party" },
+			],
+		})
+		expect(logFns.logPhaseStart).toHaveBeenCalledWith(
+			"Computing client churn metrics",
+		)
+	})
+
 	it("runChurnOnlyMode treats churn errors as fatal", async () => {
 		const churnError = new Error("boom")
 		const computeMock = vi.fn().mockRejectedValue(churnError)
