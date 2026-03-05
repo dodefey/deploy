@@ -89,6 +89,12 @@ export interface TChurnReportOptions extends TChurnOptions {
 	runMode?: string
 	producerName?: string
 	producerVersion?: string
+	groupRules?: TChurnGroupRule[]
+}
+
+export interface TChurnGroupRule {
+	pattern: string
+	group: string
 }
 
 export interface TBuildChurnReportInput {
@@ -114,7 +120,7 @@ export async function computeClientChurnReport(
 	let localManifest: TChurnManifest
 	let localManifestContent: string
 	try {
-		localManifest = await buildLocalManifest(clientDir)
+		localManifest = await buildLocalManifest(clientDir, opts.groupRules)
 		localManifestContent = JSON.stringify(localManifest) + "\n"
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
@@ -199,6 +205,7 @@ async function directoryExists(dir: string): Promise<boolean> {
 
 export async function buildLocalManifest(
 	clientDir: string,
+	groupRules: TChurnGroupRule[] = [],
 ): Promise<TChurnManifest> {
 	const files = await collectFiles(clientDir)
 	const entries: TChurnManifestFile[] = []
@@ -212,7 +219,7 @@ export async function buildLocalManifest(
 			size,
 			sha256,
 			assetType: detectAssetType(normalizedPath),
-			ownerGroup: inferOwnerGroup(normalizedPath),
+			ownerGroup: inferOwnerGroupWithRules(normalizedPath, groupRules),
 		})
 	}
 
@@ -229,8 +236,9 @@ export async function buildLocalManifest(
 
 export async function buildLocalManifestContent(
 	clientDir: string,
+	groupRules: TChurnGroupRule[] = [],
 ): Promise<string> {
-	const manifest = await buildLocalManifest(clientDir)
+	const manifest = await buildLocalManifest(clientDir, groupRules)
 	return JSON.stringify(manifest) + "\n"
 }
 
@@ -342,6 +350,71 @@ export function inferOwnerGroup(normalizedPath: string): string {
 	}
 
 	return "unknown"
+}
+
+export function inferOwnerGroupWithRules(
+	normalizedPath: string,
+	groupRules: TChurnGroupRule[] = [],
+): string {
+	const matched = matchOwnerGroupRule(normalizedPath, groupRules)
+	if (matched) {
+		return matched
+	}
+
+	return inferOwnerGroup(normalizedPath)
+}
+
+function matchOwnerGroupRule(
+	normalizedPath: string,
+	groupRules: TChurnGroupRule[],
+): string | undefined {
+	if (!groupRules.length) return undefined
+
+	const withoutPrefix = normalizedPath.startsWith("./")
+		? normalizedPath.slice(2)
+		: normalizedPath
+
+	for (const rule of groupRules) {
+		const pattern = rule.pattern.trim()
+		const group = rule.group.trim()
+		if (!pattern || !group) continue
+
+		if (doesPatternMatchPath(pattern, normalizedPath, withoutPrefix)) {
+			return group
+		}
+	}
+
+	return undefined
+}
+
+function doesPatternMatchPath(
+	pattern: string,
+	normalizedPath: string,
+	pathWithoutPrefix: string,
+): boolean {
+	const normalizedPattern = pattern.startsWith("./")
+		? pattern.slice(2)
+		: pattern
+
+	if (!/[*?]/.test(normalizedPattern)) {
+		return (
+			normalizedPath.includes(pattern) ||
+			pathWithoutPrefix.includes(normalizedPattern)
+		)
+	}
+
+	const regex = globToRegExp(normalizedPattern)
+	return regex.test(pathWithoutPrefix)
+}
+
+function globToRegExp(globPattern: string): RegExp {
+	const escaped = globPattern.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+	const placeholder = "__DOUBLE_STAR__"
+	const withPlaceholder = escaped.replace(/\*\*/g, placeholder)
+	const singleStarExpanded = withPlaceholder.replace(/\*/g, "[^/]*")
+	const questionExpanded = singleStarExpanded.replace(/\?/g, "[^/]")
+	const expanded = questionExpanded.replaceAll(placeholder, ".*")
+	return new RegExp(`^${expanded}$`)
 }
 
 function shellQuoteSingle(value: string): string {

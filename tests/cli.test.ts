@@ -373,6 +373,7 @@ describe("src/cli.ts wiring", () => {
 		expect(args.churnDiagnostics).toBe("full")
 		expect(args.churnTopN).toBe(3)
 		expect(args.churnReportOut).toBe("./reports/churn.json")
+		expect(args.churnGroupRules).toEqual([])
 	})
 
 	it("buildDeployArgs rejects invalid churnDiagnostics override", async () => {
@@ -931,6 +932,7 @@ describe("src/cli.ts wiring", () => {
 			dryRun: false,
 			profileName: "p",
 			runMode: "deploy",
+			groupRules: [],
 		})
 		expect(formatDiagnosticsMock).not.toHaveBeenCalled()
 		expect(logFns.logChurnSummary).toHaveBeenCalledWith(
@@ -1030,6 +1032,7 @@ describe("src/cli.ts wiring", () => {
 			dryRun: false,
 			profileName: "p",
 			runMode: "deploy",
+			groupRules: [],
 		})
 		expect(formatDiagnosticsMock).toHaveBeenCalledWith(
 			expect.objectContaining({ schema: "com.dodefey.churn-report" }),
@@ -1096,6 +1099,7 @@ describe("src/cli.ts wiring", () => {
 			dryRun: false,
 			profileName: "p",
 			runMode: "deploy",
+			groupRules: [],
 		})
 		expect(formatDiagnosticsMock).not.toHaveBeenCalled()
 		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
@@ -1140,6 +1144,7 @@ describe("src/cli.ts wiring", () => {
 			dryRun: false,
 			profileName: "p",
 			runMode: "churnOnly",
+			groupRules: [],
 		})
 		expect(formatDiagnosticsMock).not.toHaveBeenCalled()
 		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(

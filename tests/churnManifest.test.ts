@@ -141,4 +141,37 @@ describe("churn manifest helpers", () => {
 		expect(parsed.files[0]?.path).toBe("./pages/index.js")
 		expect(parsed.files[0]?.ownerGroup).toBe("page")
 	})
+
+	it("applies groupRules before heuristic owner grouping", async () => {
+		const dir = await createTempDir("deploy-churn-manifest-rules-")
+		tempDirs.push(dir)
+		await ensureFile(
+			path.join(dir, "components/button.js"),
+			"export const Button = {}\n",
+		)
+
+		const manifest = await buildLocalManifest(dir, [
+			{ pattern: "components/**", group: "ui" },
+		])
+
+		expect(manifest.files).toHaveLength(1)
+		expect(manifest.files[0]?.path).toBe("./components/button.js")
+		expect(manifest.files[0]?.ownerGroup).toBe("ui")
+	})
+
+	it("supports non-glob substring matching in groupRules", async () => {
+		const dir = await createTempDir("deploy-churn-manifest-rules-substr-")
+		tempDirs.push(dir)
+		await ensureFile(
+			path.join(dir, "chunks/vendor.runtime.js"),
+			"console.log('runtime')\n",
+		)
+
+		const manifest = await buildLocalManifest(dir, [
+			{ pattern: "vendor", group: "third-party" },
+		])
+
+		expect(manifest.files).toHaveLength(1)
+		expect(manifest.files[0]?.ownerGroup).toBe("third-party")
+	})
 })

@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 
+import { cli, define } from "gunshi"
 import { promises as fs } from "node:fs"
 import * as path from "node:path"
-import { cli, define } from "gunshi"
 import type { TBuildOutputMode } from "./build.js"
 import { runBuild } from "./build.js"
 import type { TChurnMetrics } from "./churn.js"
 import { computeClientChurnReport } from "./churn.js"
+import { formatChurnReportDiagnostics } from "./churnDiagnosticsFormat.js"
+import type { TChurnReportV1 } from "./churnSchema.js"
 import type { TConfigErrorCode, TResolvedConfig } from "./config.js"
 import { listProfiles, resolveProfile } from "./config.js"
-import { formatChurnReportDiagnostics } from "./churnDiagnosticsFormat.js"
 import {
 	logChurnOnlyStart,
 	logChurnOnlySuccess,
@@ -27,7 +28,6 @@ import {
 import { updatePM2App } from "./pm2.js"
 import { syncBuild } from "./syncBuild.js"
 import { runTests } from "./test.js"
-import type { TChurnReportV1 } from "./churnSchema.js"
 
 // Exit semantics:
 // - Fatal phases: configuration, tests, build, sync, churn-only (exit 1 via handleFatalError).
@@ -55,6 +55,7 @@ interface TDeployArgs {
 	churnDiagnostics?: TChurnDiagnosticsMode
 	churnTopN?: number
 	churnReportOut?: string
+	churnGroupRules?: Array<{ pattern: string; group: string }>
 }
 
 type TChurnDiagnosticsMode = "off" | "compact" | "full" | "json"
@@ -202,7 +203,6 @@ const deployCommand = define({
 			lastProfileUsed = deploy.profileName
 		} catch (err) {
 			handleFatalError("Configuration", err, values.profile)
-			return
 		}
 
 		if (deploy.churnOnly) {
@@ -359,6 +359,7 @@ async function runChurnAnalysis(
 		dryRun: values.dryRun,
 		profileName: values.profileName,
 		runMode,
+		groupRules: values.churnGroupRules ?? [],
 	})
 
 	logChurnSummary(reportCoreToMetrics(report), { dryRun: values.dryRun })
@@ -500,6 +501,7 @@ function buildDeployArgs(
 		),
 		churnTopN: resolveChurnTopN(values.churnTopN, churnDefaults.topN),
 		churnReportOut: normalizeChurnReportOut(values.churnReportOut),
+		churnGroupRules: churnDefaults.groupRules,
 	}
 }
 
