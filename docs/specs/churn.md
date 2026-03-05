@@ -104,6 +104,7 @@ Typed churn errors (`Error.cause`):
 
 - Human-facing summary formatting: `src/churnFormat.ts`
 - Diagnostics formatting: `src/churnDiagnosticsFormat.ts`
+- Report/history output routing is handled by `src/cli.ts` (`--churnReportOut`, `--churnHistoryOut`).
 
 ## 10. Operational Guidance
 
@@ -122,6 +123,10 @@ Per environment:
 2. Confirm first non-dry run creates `${remoteDir}/.deploy/manifest.json`.
 3. Confirm the next run reports `baseline.available=true`.
 4. If `--churnReportOut` is used, confirm artifact retention policy is in place.
+5. Confirm churn history destination behavior:
+    - default `.deploy/churn-history.jsonl` appends per run
+    - `--churnHistoryOut off` disables history writes
+    - `--churnHistoryOut stdout` emits JSONL to stdout
 
 ### 10.3 Failure handling
 

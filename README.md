@@ -9,7 +9,7 @@ A small gunshi-based CLI that deploys a **profile-defined build** managed by PM2
 - Typed error codes across build, sync, PM2, config, and churn for predictable handling.
 - Flexible output modes (`inherit`, `silent`, `callbacks`) for build/rsync/PM2 stages.
 - Dry-run mode: run build + churn and perform an rsync `--dry-run`; skip PM2 restart and make no remote writes.
-- Optional enhanced churn diagnostics/report output for actionable churn analysis.
+- Optional enhanced churn diagnostics/report/history output for actionable churn analysis.
 
 ## Requirements
 
@@ -86,6 +86,13 @@ Flags (from `src/cli.ts`):
 - `--churnDiagnostics <off|compact|full|json>` Enable enhanced churn diagnostics output mode.
 - `--churnTopN <n>` Limit top offenders shown in diagnostics output.
 - `--churnReportOut <stdout|path>` Emit canonical churn report JSON to stdout or a file path.
+- `--churnHistoryOut <stdout|off|path>` Append churn history JSONL to stdout or a file path; use `off` to disable. Defaults to `.deploy/churn-history.jsonl`.
+
+Churn output notes:
+
+- `--churnReportOut` writes the full canonical report (`TChurnReportV1`).
+- `--churnHistoryOut` appends one JSONL history record per run.
+- If omitted, history defaults to `.deploy/churn-history.jsonl`.
 
 Example:
 
@@ -105,7 +112,7 @@ node dist/cli.js deploy \
 3. **Build**: Run the profile-defined build command (via `runBuild`); stdout mode per `--verbose`.
 4. **Sync**: `rsync` local `.output` to `${remoteDir}/.output` (or override), honors `--dryRun`.
 5. **PM2**: `pm2 startOrReload` (or `reboot`) app in `remoteDir`; reports instance count.
-6. **Churn**: compute canonical churn report against `${remoteDir}/.deploy/manifest.json`, log churn summary from report core metrics, optionally render diagnostics, and upload updated baseline unless `--dryRun`.
+6. **Churn**: compute canonical churn report against `${remoteDir}/.deploy/manifest.json`, log churn summary from report core metrics, optionally render diagnostics, optionally write full report output, optionally append churn history JSONL, and upload updated baseline unless `--dryRun`.
 
 ## Scripts
 

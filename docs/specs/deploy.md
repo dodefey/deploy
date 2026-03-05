@@ -35,6 +35,7 @@ Supported flags:
 - `--churnDiagnostics <off|compact|full|json>`
 - `--churnTopN <positive integer>`
 - `--churnReportOut <stdout|path>`
+- `--churnHistoryOut <stdout|off|path>`
 
 ---
 
@@ -52,7 +53,7 @@ Resolved values are normalized into `TDeployArgs`, including:
 
 - Connection/build/runtime values.
 - Runtime flags.
-- Churn diagnostics options (`churnDiagnostics`, `churnTopN`, `churnReportOut`).
+- Churn diagnostics options (`churnDiagnostics`, `churnTopN`, `churnReportOut`, `churnHistoryOut`).
 
 ### 3.3 Churn defaults
 
@@ -61,6 +62,7 @@ If CLI churn options are not provided:
 - `churnDiagnostics` defaults to profile `churn.diagnosticsDefault` (or `off`).
 - `churnTopN` defaults to profile `churn.topN` (or `5`).
 - `churnReportOut` defaults to undefined.
+- `churnHistoryOut` defaults to `.deploy/churn-history.jsonl` and may be disabled with `off`.
 
 Invalid churn option values are treated as config-invalid errors (`CONFIG_PROFILE_INVALID`).
 
@@ -125,6 +127,7 @@ If `--churnOnly` is set:
 - Logs churn summary derived from report `core`.
 - Emits diagnostics text/json when diagnostics mode is not `off`.
 - Writes report JSON when `churnReportOut` is set (`stdout` or file path).
+- Appends churn history JSONL when `churnHistoryOut` is enabled (`stdout` or file path).
 
 ### 5.6 Churn fatality rules
 
@@ -160,6 +163,8 @@ See `docs/specs/exit-semantics.md` for full rules.
 - Churn always computes canonical report data.
 - Summary output always comes from report `core`.
 - Diagnostics display remains optional via `churnDiagnostics`.
+- Full report output is optional via `churnReportOut`.
+- JSONL history output is enabled by default via `churnHistoryOut` unless explicitly set to `off`.
 
 ---
 

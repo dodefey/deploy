@@ -245,7 +245,7 @@ try {
     - Fatal vs non-fatal phase behavior.
 
 - Churn diagnostics/report output behavior:
-    - CLI flags for diagnostics mode, top-N, and report output stay supported.
+    - CLI flags for diagnostics mode, top-N, report output, and history output stay supported.
     - Churn computation always uses the canonical report path.
 
 - You **may**:
