@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## v0.2.0 - 2026-03-05
+
 - breaking change: churn analysis now uses a single canonical manifest/report pipeline with `${remoteDir}/.deploy/manifest.json`; legacy churn paths and `v2` naming were removed.
 - docs: clarify churn output flags and defaults (`--churnReportOut` vs `--churnHistoryOut`, including default `.deploy/churn-history.jsonl`)
 - change: churn history records now embed the full canonical report payload under `report` for downstream analysis.
