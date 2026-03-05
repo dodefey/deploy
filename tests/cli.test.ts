@@ -902,6 +902,50 @@ describe("src/cli.ts wiring", () => {
 		)
 	})
 
+	it("runChurnPhase uses legacy churn path by default", async () => {
+		const computeLegacyMock = vi.fn().mockResolvedValue("metrics")
+		const computeReportMock = vi
+			.fn()
+			.mockResolvedValue(buildReportFixture())
+		const formatDiagnosticsMock = vi.fn().mockReturnValue("diag-output")
+		const { logFns } = setupMocks({
+			computeClientChurnImpl: computeLegacyMock,
+			computeClientChurnReportImpl: computeReportMock,
+			formatChurnReportDiagnosticsImpl: formatDiagnosticsMock,
+		})
+		const { __test__ } = await importMain()
+
+		await __test__.runChurnPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			profileName: "p",
+			churnDiagnostics: "off",
+		})
+
+		expect(computeLegacyMock).toHaveBeenCalledWith({
+			buildDir: "/b",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			dryRun: false,
+		})
+		expect(computeReportMock).not.toHaveBeenCalled()
+		expect(formatDiagnosticsMock).not.toHaveBeenCalled()
+		expect(logFns.logChurnSummary).toHaveBeenCalledWith("metrics", {
+			dryRun: false,
+		})
+	})
+
 	it("runChurnOnlyMode treats churn errors as fatal", async () => {
 		const churnError = new Error("boom")
 		const computeMock = vi.fn().mockRejectedValue(churnError)
@@ -984,8 +1028,75 @@ describe("src/cli.ts wiring", () => {
 			expect.objectContaining({ schema: "com.dodefey.churn-report" }),
 			{ mode: "full", topN: 2 },
 		)
-		expect(logFns.logChurnSummary).toHaveBeenCalled()
+		expect(logFns.logChurnSummary).toHaveBeenCalledWith(
+			{
+				totalOldFiles: 10,
+				totalNewFiles: 12,
+				stableFiles: 5,
+				changedFiles: 2,
+				addedFiles: 3,
+				removedFiles: 1,
+				totalOldBytes: 1000,
+				totalNewBytes: 1500,
+				stableBytes: 500,
+				changedBytes: 300,
+				addedBytes: 700,
+				removedBytes: 200,
+				downloadImpactFilesPercent: 41.7,
+				cacheReuseFilesPercent: 58.3,
+				downloadImpactBytesPercent: 66.7,
+				cacheReuseBytesPercent: 33.3,
+			},
+			{ dryRun: false },
+		)
 		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith("diag-output")
+	})
+
+	it("runChurnPhase uses report path when churnReportOut is set", async () => {
+		const computeLegacyMock = vi.fn().mockResolvedValue("metrics")
+		const computeReportMock = vi
+			.fn()
+			.mockResolvedValue(buildReportFixture())
+		const formatDiagnosticsMock = vi.fn().mockReturnValue("diag-output")
+		const { logFns } = setupMocks({
+			computeClientChurnImpl: computeLegacyMock,
+			computeClientChurnReportImpl: computeReportMock,
+			formatChurnReportDiagnosticsImpl: formatDiagnosticsMock,
+		})
+		const { __test__ } = await importMain()
+
+		await __test__.runChurnPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			profileName: "p",
+			churnDiagnostics: "off",
+			churnReportOut: "stdout",
+		})
+
+		expect(computeLegacyMock).not.toHaveBeenCalled()
+		expect(computeReportMock).toHaveBeenCalledWith({
+			buildDir: "/b",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			dryRun: false,
+			profileName: "p",
+			runMode: "deploy",
+		})
+		expect(formatDiagnosticsMock).not.toHaveBeenCalled()
+		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
+			expect.stringContaining('"schema": "com.dodefey.churn-report"'),
+		)
 	})
 
 	it("runChurnOnlyMode writes report JSON to stdout when requested", async () => {
