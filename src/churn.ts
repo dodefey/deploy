@@ -1,12 +1,16 @@
 import { spawn } from "node:child_process"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { promises as fs } from "node:fs"
 import * as path from "node:path"
 import {
 	CHURN_MANIFEST_SCHEMA,
 	CHURN_MANIFEST_SCHEMA_VERSION,
+	CHURN_REPORT_METRIC_SET_VERSION,
+	CHURN_REPORT_SCHEMA,
+	CHURN_REPORT_SCHEMA_VERSION,
 	type TChurnCategoryTotals,
 	type TChurnDiagnosticsCategories,
+	type TChurnReportV1,
 	parseChurnManifestV2Json,
 	type TChurnManifestV2,
 	type TChurnManifestV2File,
@@ -86,6 +90,26 @@ export type TChurnErrorCode =
 	| "CHURN_REMOTE_MANIFEST_UPLOAD_FAILED"
 	| "CHURN_COMPUTE_FAILED"
 
+export interface TChurnReportOptions extends TChurnOptions {
+	profileName?: string
+	runMode?: string
+	producerName?: string
+	producerVersion?: string
+}
+
+export interface TBuildChurnReportInput {
+	metrics: TChurnMetrics
+	dryRun: boolean
+	diagnosticsDiff?: TManifestV2DiffResult
+	diagnosticsWarning?: string
+	profileName?: string
+	runMode?: string
+	producerName?: string
+	producerVersion?: string
+	reportId?: string
+	generatedAt?: string
+}
+
 export async function computeClientChurn(
 	opts: TChurnOptions,
 ): Promise<TChurnMetrics> {
@@ -131,6 +155,93 @@ export async function computeClientChurn(
 	}
 
 	return metrics
+}
+
+export async function computeClientChurnReport(
+	opts: TChurnReportOptions,
+): Promise<TChurnReportV1> {
+	const buildDir = path.resolve(opts.buildDir)
+	const clientDir = path.join(buildDir, CLIENT_SUBDIR)
+
+	await ensureClientDirectory(clientDir)
+
+	let localManifestContent: string
+	let localManifestV2: TChurnManifestV2
+	let localManifestV2Content: string
+	try {
+		localManifestContent = await buildLocalManifestContent(clientDir)
+		localManifestV2 = await buildLocalManifestV2(clientDir)
+		localManifestV2Content = JSON.stringify(localManifestV2) + "\n"
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err)
+		throw churnError("CHURN_COMPUTE_FAILED", message)
+	}
+
+	const remoteManifestPath = buildRemoteManifestPath(opts.remoteDir)
+	const remoteManifestV2Path = buildRemoteManifestV2Path(opts.remoteDir)
+	const remoteManifest = await loadRemoteManifest(
+		opts.sshConnectionString,
+		remoteManifestPath,
+		DEFAULT_SSH_OPTS,
+	)
+
+	if (remoteManifest.kind === "error") {
+		throw churnError(
+			"CHURN_REMOTE_MANIFEST_FETCH_FAILED",
+			remoteManifest.reason,
+		)
+	}
+
+	const remoteManifestV2 = await loadRemoteManifestV2(
+		opts.sshConnectionString,
+		remoteManifestV2Path,
+		DEFAULT_SSH_OPTS,
+	)
+
+	const metrics = computeChurnFromManifests(
+		remoteManifest,
+		localManifestContent,
+	)
+
+	let diagnosticsDiff: TManifestV2DiffResult | undefined
+	let diagnosticsWarning: string | undefined
+	if (remoteManifestV2.kind === "ok") {
+		diagnosticsDiff = compareManifestsV2(
+			remoteManifestV2.manifest,
+			localManifestV2,
+		)
+	} else if (remoteManifestV2.kind === "none") {
+		diagnosticsWarning =
+			"Enhanced diagnostics unavailable: no previous manifest.v2 baseline."
+	} else {
+		diagnosticsWarning = `Enhanced diagnostics unavailable: ${remoteManifestV2.reason}`
+	}
+
+	if (!opts.dryRun) {
+		await uploadRemoteManifest(
+			opts.sshConnectionString,
+			remoteManifestPath,
+			localManifestContent,
+			DEFAULT_SSH_OPTS,
+		)
+		await uploadRemoteManifestV2(
+			opts.sshConnectionString,
+			remoteManifestV2Path,
+			localManifestV2Content,
+			DEFAULT_SSH_OPTS,
+		)
+	}
+
+	return buildChurnReport({
+		metrics,
+		dryRun: opts.dryRun,
+		diagnosticsDiff,
+		diagnosticsWarning,
+		profileName: opts.profileName,
+		runMode: opts.runMode,
+		producerName: opts.producerName,
+		producerVersion: opts.producerVersion,
+	})
 }
 
 async function ensureClientDirectory(dir: string): Promise<void> {
@@ -649,6 +760,105 @@ function buildCategoryTotalsFromRemovedFiles(
 		bytes += file.size
 	}
 	return { files: files.length, bytes }
+}
+
+export function buildChurnReport(
+	input: TBuildChurnReportInput,
+): TChurnReportV1 {
+	const baselineAvailable =
+		input.metrics.totalOldFiles > 0 || input.metrics.totalOldBytes > 0
+	const capabilities = input.diagnosticsDiff
+		? {
+				hashDiff: true,
+				renameDetection: "hash-match-v1",
+				assetTyping: "extension-v1",
+				ownerGrouping: "heuristic-v1",
+			}
+		: {
+				hashDiff: false,
+				renameDetection: "unavailable",
+				assetTyping: "unavailable",
+				ownerGrouping: "unavailable",
+			}
+
+	const diagnostics = input.diagnosticsDiff
+		? buildReportDiagnostics(input.diagnosticsDiff)
+		: undefined
+	const warnings = input.diagnosticsWarning ? [input.diagnosticsWarning] : []
+
+	return {
+		schema: CHURN_REPORT_SCHEMA,
+		schemaVersion: CHURN_REPORT_SCHEMA_VERSION,
+		metricSetVersion: CHURN_REPORT_METRIC_SET_VERSION,
+		reportId: input.reportId ?? randomUUID(),
+		generatedAt: input.generatedAt ?? new Date().toISOString(),
+		producer: {
+			name: input.producerName ?? "@dodefey/deploy",
+			version: input.producerVersion ?? "unknown",
+		},
+		run: {
+			profile: input.profileName ?? "unknown",
+			mode: input.runMode ?? "deploy",
+			dryRun: input.dryRun,
+		},
+		baseline: {
+			available: baselineAvailable,
+			kind: baselineAvailable ? "previous_deploy" : "none",
+			distance: baselineAvailable ? 1 : 0,
+		},
+		capabilities,
+		core: {
+			files: {
+				totalOld: input.metrics.totalOldFiles,
+				totalNew: input.metrics.totalNewFiles,
+				stable: input.metrics.stableFiles,
+				changed: input.metrics.changedFiles,
+				added: input.metrics.addedFiles,
+				removed: input.metrics.removedFiles,
+			},
+			bytes: {
+				totalOld: input.metrics.totalOldBytes,
+				totalNew: input.metrics.totalNewBytes,
+				stable: input.metrics.stableBytes,
+				changed: input.metrics.changedBytes,
+				added: input.metrics.addedBytes,
+				removed: input.metrics.removedBytes,
+			},
+			percent: {
+				downloadImpactFiles: input.metrics.downloadImpactFilesPercent,
+				cacheReuseFiles: input.metrics.cacheReuseFilesPercent,
+				downloadImpactBytes: input.metrics.downloadImpactBytesPercent,
+				cacheReuseBytes: input.metrics.cacheReuseBytesPercent,
+			},
+		},
+		diagnostics,
+		quality: {
+			comparableClass: input.diagnosticsDiff
+				? "core-1+hash-v1"
+				: "core-1",
+			warnings,
+		},
+	}
+}
+
+function buildReportDiagnostics(
+	diff: TManifestV2DiffResult,
+): NonNullable<TChurnReportV1["diagnostics"]> {
+	const downloadBytes =
+		diff.categories.changed_same_path.bytes +
+		diff.categories.renamed_same_hash.bytes +
+		diff.categories.new_content.bytes
+	const renameNoiseBytes = diff.categories.renamed_same_hash.bytes
+	const renameNoisePercentOfDownloadBytes =
+		downloadBytes > 0 ? (renameNoiseBytes * 100) / downloadBytes : 0
+
+	return {
+		categories: diff.categories,
+		avoidableChurn: {
+			renameNoiseBytes,
+			renameNoisePercentOfDownloadBytes,
+		},
+	}
 }
 
 export function compareManifests(
