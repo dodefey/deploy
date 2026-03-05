@@ -8,8 +8,8 @@ import {
 	CHURN_REPORT_SCHEMA,
 	CHURN_REPORT_SCHEMA_MAJOR,
 	CHURN_REPORT_SCHEMA_VERSION,
-	parseChurnManifestV2,
-	parseChurnManifestV2Json,
+	parseChurnManifest,
+	parseChurnManifestJson,
 	parseChurnReportV1,
 	parseChurnReportV1Json,
 } from "../src/churnSchema"
@@ -17,8 +17,8 @@ import {
 describe("churnSchema constants", () => {
 	it("exposes stable schema constants", () => {
 		expect(CHURN_MANIFEST_SCHEMA).toBe("com.dodefey.churn-manifest")
-		expect(CHURN_MANIFEST_SCHEMA_MAJOR).toBe(2)
-		expect(CHURN_MANIFEST_SCHEMA_VERSION).toBe("2.0.0")
+		expect(CHURN_MANIFEST_SCHEMA_MAJOR).toBe(1)
+		expect(CHURN_MANIFEST_SCHEMA_VERSION).toBe("1.0.0")
 
 		expect(CHURN_REPORT_SCHEMA).toBe("com.dodefey.churn-report")
 		expect(CHURN_REPORT_SCHEMA_MAJOR).toBe(1)
@@ -27,11 +27,11 @@ describe("churnSchema constants", () => {
 	})
 })
 
-describe("parseChurnManifestV2", () => {
+describe("parseChurnManifest", () => {
 	it("accepts unknown fields for forward compatibility", () => {
-		const manifest = parseChurnManifestV2({
+		const manifest = parseChurnManifest({
 			schema: CHURN_MANIFEST_SCHEMA,
-			schemaVersion: "2.1.0",
+			schemaVersion: "1.1.0",
 			generatedAt: "2026-03-05T16:00:00Z",
 			root: "public/_nuxt",
 			ignoredTopLevel: "ok",
@@ -49,7 +49,7 @@ describe("parseChurnManifestV2", () => {
 
 		expect(manifest).toEqual({
 			schema: CHURN_MANIFEST_SCHEMA,
-			schemaVersion: "2.1.0",
+			schemaVersion: "1.1.0",
 			generatedAt: "2026-03-05T16:00:00Z",
 			root: "public/_nuxt",
 			files: [
@@ -73,20 +73,20 @@ describe("parseChurnManifestV2", () => {
 			files: [],
 		})
 
-		const parsed = parseChurnManifestV2Json(content)
+		const parsed = parseChurnManifestJson(content)
 		expect(parsed.files).toEqual([])
 	})
 
 	it("rejects unsupported major versions", () => {
 		expect(() =>
-			parseChurnManifestV2({
+			parseChurnManifest({
 				schema: CHURN_MANIFEST_SCHEMA,
-				schemaVersion: "3.0.0",
+				schemaVersion: "2.0.0",
 				generatedAt: "2026-03-05T16:00:00Z",
 				root: "public/_nuxt",
 				files: [],
 			}),
-		).toThrow(/major version 2/)
+		).toThrow(/major version 1/)
 	})
 })
 
@@ -113,9 +113,9 @@ describe("parseChurnReportV1", () => {
 		},
 		capabilities: {
 			hashDiff: true,
-			renameDetection: "hash-match-v1",
-			assetTyping: "extension-v1",
-			ownerGrouping: "heuristic-v1",
+			renameDetection: "hash-match",
+			assetTyping: "extension",
+			ownerGrouping: "heuristic",
 		},
 		core: {
 			files: {
@@ -142,7 +142,7 @@ describe("parseChurnReportV1", () => {
 			},
 		},
 		quality: {
-			comparableClass: "core-1+hash-v1",
+			comparableClass: "core-1+hash",
 			warnings: [],
 		},
 	}

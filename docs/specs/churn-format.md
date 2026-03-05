@@ -4,7 +4,7 @@
 
 Formatting behavior is split across two helpers:
 
-- `src/churnFormat.ts`: legacy core churn summary text from `TChurnMetrics`.
+- `src/churnFormat.ts`: core churn summary text from `TChurnMetrics`.
 - `src/churnDiagnosticsFormat.ts`: enhanced diagnostics rendering from `TChurnReportV1`.
 
 The core helper (`churnFormat`) is responsible for **turning raw churn metrics into a human-readable, multi-line summary string** suitable for CLI output.
@@ -74,7 +74,7 @@ export function formatChurnMetrics(
 ```
 
 - Input:
-    - `metrics`: the raw churn data returned by `computeClientChurn`.
+    - `metrics`: the raw churn data mapped from canonical report `core` metrics.
     - `options.dryRun`: whether the churn run is a dry run.
 
 - Output:

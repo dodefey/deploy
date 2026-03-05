@@ -2,160 +2,136 @@
 
 ## 1. Purpose
 
-The churn module measures client-bundle cache impact for returning users and now supports two output levels:
+The churn module computes deploy-to-deploy client cache impact and produces a canonical churn report.
 
-- `computeClientChurn`: legacy core metrics only.
-- `computeClientChurnReport`: canonical report envelope with core metrics plus hash-based diagnostics when available.
+It exposes one compute entrypoint:
 
-Default deploy behavior remains legacy-compatible unless diagnostics/report output is explicitly requested by CLI/config.
+- `computeClientChurnReport(opts)`
 
----
+## 2. Manifest Input and Location
 
-## 2. Manifest Inputs and Locations
-
-All churn analysis starts from the local client directory:
+Local source assets are read from:
 
 ```txt
 buildDir/public/_nuxt
 ```
 
-Remote manifests live outside rsync-managed output:
+Remote baseline path:
 
-- Legacy manifest: `remoteDir/.deploy/manifest`
-- Rich manifest v2: `remoteDir/.deploy/manifest.v2.json`
+- `${remoteDir}/.deploy/manifest.json`
 
-Keeping them under `.deploy/` ensures persistence across deploys and avoids deletion by bundle sync operations.
+The manifest is kept under `.deploy/` so it is not removed by bundle sync operations.
 
----
+## 3. Manifest Model
 
-## 3. Legacy Manifest (`manifest`)
-
-Legacy manifest lines use:
-
-```txt
-<size>  ./relative/path/to/asset.js
-```
-
-Properties:
-
-- File identity is path.
-- Size is included for byte impact calculations.
-- Entries are sorted lexicographically.
-- File ends with `\n` when non-empty.
-
-This format powers stable, existing `TChurnMetrics` behavior.
-
----
-
-## 4. Manifest v2 (`manifest.v2.json`)
-
-Manifest v2 is a JSON payload with schema/version metadata and per-file records:
+Manifest schema is JSON (`com.dodefey.churn-manifest`, `1.x`) with per-file records:
 
 - `path`
 - `size`
 - `sha256`
-- `assetType` (extension-based classifier)
-- `ownerGroup` (heuristic group inference, e.g. vendor/layout/page/component/unknown)
+- `assetType`
+- `ownerGroup`
 
-Schema and parsing are defined in `src/churnSchema.ts` and are major-version compatible for forward evolution.
+Schema parsing and validation are defined in `src/churnSchema.ts`.
 
----
+## 4. Core Metrics Model
 
-## 5. Core Metrics Model
+Core metrics are derived from path+size comparisons between previous and current manifests:
 
-Core metrics remain unchanged and are still derived from path+size comparisons:
-
-- File totals and transitions: old/new/stable/changed/added/removed
-- Byte totals and transitions: old/new/stable/changed/added/removed
+- File totals: old/new/stable/changed/added/removed
+- Byte totals: old/new/stable/changed/added/removed
 - Percentages:
-    - file download impact / cache reuse
-    - byte download impact / cache reuse
+    - download impact / cache reuse by files
+    - download impact / cache reuse by bytes
 
-These core metrics are the comparability anchor (`metricSetVersion = "core-1"` in reports).
+## 5. Diagnostics Categories
 
----
+Diagnostics are always computed from hash-aware manifest diff:
 
-## 6. Hash-Aware Diff Categories (v2)
+- `reused_exact`
+- `changed_same_path`
+- `renamed_same_hash`
+- `new_content`
+- `removed`
 
-When both old and new manifest v2 are available, the module computes:
+Report diagnostics also include avoidable rename noise totals.
 
-- `reused_exact`: same path, same hash
-- `changed_same_path`: same path, different hash
-- `renamed_same_hash`: different path, same hash
-- `new_content`: new path with no hash match in removed set
-- `removed`: old path removed with no rename/hash match
+## 6. Public APIs
 
-These categories provide root-cause diagnostics beyond aggregate churn.
-
----
-
-## 7. Public APIs
-
-### 7.1 `computeClientChurn(opts)`
+### 6.1 `computeClientChurnReport(opts)`
 
 Behavior:
 
-1. Build local legacy manifest.
-2. Load remote legacy manifest (missing means no baseline).
-3. Compute `TChurnMetrics`.
-4. Upload legacy manifest unless `dryRun`.
+1. Build local manifest JSON.
+2. Load remote manifest JSON baseline if present.
+3. Compute core metrics from previous/current manifests.
+4. Compute diagnostics diff categories.
+5. Build `TChurnReportV1` payload.
+6. Upload updated manifest baseline unless `dryRun`.
 
-### 7.2 `computeClientChurnReport(opts)`
+If the baseline file is missing, the run proceeds with an empty previous manifest.
 
-Behavior:
-
-1. Build local legacy manifest and local manifest v2.
-2. Load remote legacy manifest and remote manifest v2.
-3. Compute core metrics from legacy manifests.
-4. If remote v2 exists and parses, compute hash-aware diagnostics.
-5. Build `TChurnReportV1` envelope.
-6. Upload legacy manifest and v2 manifest unless `dryRun`.
-
-If remote v2 is missing or invalid, report is still returned with core metrics and quality warnings explaining diagnostics unavailability.
-
----
-
-## 8. Canonical Report (`TChurnReportV1`)
+## 7. Report Contract (`TChurnReportV1`)
 
 Report includes:
 
-- Identity/versioning: `schema`, `schemaVersion`, `metricSetVersion`, `reportId`, `generatedAt`
-- Run metadata: producer, profile, mode, dry-run
-- Baseline metadata: availability/kind/distance
-- Capability metadata (hash diff availability and classifier versions)
-- `core` metrics (same semantics as legacy output)
-- Optional `diagnostics` (category totals, avoidable rename noise)
-- `quality` metadata (comparability class + warnings)
+- `schema`, `schemaVersion`, `metricSetVersion`, `reportId`, `generatedAt`
+- `producer`, `run`, `baseline`
+- `capabilities`
+- `core`
+- `diagnostics`
+- `quality`
 
-Comparability rule of thumb:
+Current capability/class values:
 
-- Always compare `core` metrics for stable trend continuity.
-- Use `quality.comparableClass` to segment analyses when diagnostics capability differs.
+- `renameDetection: "hash-match"`
+- `assetTyping: "extension"`
+- `ownerGrouping: "heuristic"`
+- `quality.comparableClass: "core-1+hash"`
 
----
+## 8. Error Model
 
-## 9. Error Model
+Typed churn errors (`Error.cause`):
 
-Churn errors use `.cause`:
-
+- `CHURN_NO_CLIENT_DIR`
 - `CHURN_REMOTE_MANIFEST_FETCH_FAILED`
 - `CHURN_REMOTE_MANIFEST_UPLOAD_FAILED`
 - `CHURN_COMPUTE_FAILED`
-- `CHURN_NO_CLIENT_DIR`
 
-`computeClientChurnReport` preserves this model and adds diagnostics warnings in-report instead of introducing new fatal codes for missing/invalid v2 baselines.
+## 9. Output Contract
 
----
+`src/churn.ts` performs no direct console logging.
 
-## 10. Output Contract
+- Human-facing summary formatting: `src/churnFormat.ts`
+- Diagnostics formatting: `src/churnDiagnosticsFormat.ts`
 
-The churn module itself remains a library (no direct console I/O):
+## 10. Operational Guidance
 
-- Legacy CLI summary still consumes `TChurnMetrics`.
-- Enhanced diagnostics text/JSON formatting is handled by CLI formatting helpers.
+### 10.1 Baseline lifecycle
 
-This preserves existing deploy output behavior by default while allowing opt-in diagnostic detail.
+- Remote baseline file is `${remoteDir}/.deploy/manifest.json`.
+- First non-dry run creates the baseline.
+- Dry-runs do not update baseline data.
+- Subsequent runs compare current manifest against the baseline.
 
-Rollout and migration guidance for operational adoption is documented in:
+### 10.2 Environment checks
 
-- `docs/specs/churn-rollout.md`
+Per environment:
+
+1. Confirm deploy runner can read/write `${remoteDir}/.deploy/`.
+2. Confirm first non-dry run creates `${remoteDir}/.deploy/manifest.json`.
+3. Confirm the next run reports `baseline.available=true`.
+4. If `--churnReportOut` is used, confirm artifact retention policy is in place.
+
+### 10.3 Failure handling
+
+- Missing baseline file is treated as empty previous state.
+- Invalid/unreadable baseline file fails churn with a typed churn error.
+- In full deploy mode, churn failure is non-fatal at orchestrator level.
+- In `--churnOnly` mode, churn failure is fatal.
+
+### 10.4 Schema/report evolution
+
+- Keep additive manifest/report changes within current major versions.
+- Bump major versions only for breaking shape or semantic changes.
+- Keep report core metric semantics stable for trend continuity.

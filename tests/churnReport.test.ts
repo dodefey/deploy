@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest"
 
 import {
 	buildChurnReport,
-	compareManifests,
-	compareManifestsV2,
+	compareManifestDiff,
+	compareManifestMetrics,
 } from "../src/churn"
 import {
 	CHURN_MANIFEST_SCHEMA,
@@ -11,11 +11,11 @@ import {
 	CHURN_REPORT_METRIC_SET_VERSION,
 	CHURN_REPORT_SCHEMA,
 	CHURN_REPORT_SCHEMA_VERSION,
-	type TChurnManifestV2,
-	type TChurnManifestV2File,
+	type TChurnManifest,
+	type TChurnManifestFile,
 } from "../src/churnSchema"
 
-function buildManifest(files: TChurnManifestV2File[]): TChurnManifestV2 {
+function buildManifest(files: TChurnManifestFile[]): TChurnManifest {
 	return {
 		schema: CHURN_MANIFEST_SCHEMA,
 		schemaVersion: CHURN_MANIFEST_SCHEMA_VERSION,
@@ -26,14 +26,52 @@ function buildManifest(files: TChurnManifestV2File[]): TChurnManifestV2 {
 }
 
 describe("buildChurnReport", () => {
-	it("keeps core metrics identical to legacy compareManifests output", () => {
-		const metrics = compareManifests(
-			["100  ./a.js", "50  ./b.js", ""].join("\n"),
-			["100  ./a.js", "80  ./b.js", "30  ./c.js", ""].join("\n"),
-		)
+	it("maps core metrics into the report envelope", () => {
+		const oldManifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "a-old",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./b.js",
+				size: 50,
+				sha256: "b-old",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+		const newManifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "a-new",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./b.js",
+				size: 80,
+				sha256: "b-new",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./c.js",
+				size: 30,
+				sha256: "c-new",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
 
 		const report = buildChurnReport({
 			metrics,
+			diagnosticsDiff: diff,
 			dryRun: false,
 			profileName: "prod",
 			runMode: "deploy",
@@ -69,78 +107,69 @@ describe("buildChurnReport", () => {
 				cacheReuseBytes: metrics.cacheReuseBytesPercent,
 			},
 		})
-		expect(report.capabilities.hashDiff).toBe(false)
-		expect(report.quality.comparableClass).toBe("core-1")
+		expect(report.capabilities).toEqual({
+			hashDiff: true,
+			renameDetection: "hash-match",
+			assetTyping: "extension",
+			ownerGrouping: "heuristic",
+		})
+		expect(report.quality.comparableClass).toBe("core-1+hash")
 		expect(report.quality.warnings).toEqual([])
-		expect(report.diagnostics).toBeUndefined()
 	})
 
-	it("includes diagnostics + quality class when hash diff is available", () => {
-		const metrics = compareManifests(
-			["100  ./a.js", "200  ./b.js", ""].join("\n"),
-			["100  ./a.js", "120  ./renamed-b.js", "300  ./c.js", ""].join(
-				"\n",
-			),
-		)
-		const diff = compareManifestsV2(
-			buildManifest([
-				{
-					path: "./a.js",
-					size: 100,
-					sha256: "h-a",
-					assetType: "js",
-					ownerGroup: "page",
-				},
-				{
-					path: "./b.js",
-					size: 200,
-					sha256: "h-b",
-					assetType: "js",
-					ownerGroup: "vendor",
-				},
-			]),
-			buildManifest([
-				{
-					path: "./a.js",
-					size: 100,
-					sha256: "h-a",
-					assetType: "js",
-					ownerGroup: "page",
-				},
-				{
-					path: "./renamed-b.js",
-					size: 120,
-					sha256: "h-b",
-					assetType: "js",
-					ownerGroup: "vendor",
-				},
-				{
-					path: "./c.js",
-					size: 300,
-					sha256: "h-c",
-					assetType: "js",
-					ownerGroup: "component",
-				},
-			]),
-		)
+	it("includes diagnostics categories and avoidable churn", () => {
+		const oldManifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "h-a",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./b.js",
+				size: 200,
+				sha256: "h-b",
+				assetType: "js",
+				ownerGroup: "vendor",
+			},
+		])
+		const newManifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "h-a",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+			{
+				path: "./renamed-b.js",
+				size: 120,
+				sha256: "h-b",
+				assetType: "js",
+				ownerGroup: "vendor",
+			},
+			{
+				path: "./c.js",
+				size: 300,
+				sha256: "h-c",
+				assetType: "js",
+				ownerGroup: "component",
+			},
+		])
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
 
 		const report = buildChurnReport({
 			metrics,
-			dryRun: true,
 			diagnosticsDiff: diff,
+			dryRun: true,
 			profileName: "prod",
 			runMode: "churnOnly",
 			reportId: "report-diff",
 			generatedAt: "2026-03-05T16:00:03Z",
 		})
 
-		expect(report.capabilities).toEqual({
-			hashDiff: true,
-			renameDetection: "hash-match-v1",
-			assetTyping: "extension-v1",
-			ownerGrouping: "heuristic-v1",
-		})
-		expect(report.quality.comparableClass).toBe("core-1+hash-v1")
 		expect(report.diagnostics?.categories).toEqual(diff.categories)
 		expect(report.diagnostics?.avoidableChurn?.renameNoiseBytes).toBe(120)
 		expect(
@@ -149,22 +178,29 @@ describe("buildChurnReport", () => {
 		).toBeCloseTo((120 * 100) / (120 + 300), 6)
 	})
 
-	it("records explicit quality warning when diagnostics are unavailable", () => {
-		const metrics = compareManifests("", "100  ./a.js\n")
+	it("sets baseline.available to false when there is no previous manifest", () => {
+		const oldManifest = buildManifest([])
+		const newManifest = buildManifest([
+			{
+				path: "./a.js",
+				size: 100,
+				sha256: "h-a",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
+
 		const report = buildChurnReport({
 			metrics,
+			diagnosticsDiff: diff,
 			dryRun: false,
-			diagnosticsWarning:
-				"Enhanced diagnostics unavailable: no previous manifest.v2 baseline.",
-			reportId: "report-warning",
+			reportId: "report-first-run",
 			generatedAt: "2026-03-05T16:00:04Z",
 		})
 
-		expect(report.quality.warnings).toEqual([
-			"Enhanced diagnostics unavailable: no previous manifest.v2 baseline.",
-		])
-		expect(report.quality.comparableClass).toBe("core-1")
-		expect(report.diagnostics).toBeUndefined()
 		expect(report.baseline.available).toBe(false)
+		expect(report.quality.warnings).toEqual([])
 	})
 })

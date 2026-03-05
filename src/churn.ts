@@ -10,15 +10,14 @@ import {
 	CHURN_REPORT_SCHEMA_VERSION,
 	type TChurnCategoryTotals,
 	type TChurnDiagnosticsCategories,
+	type TChurnManifest,
+	type TChurnManifestFile,
 	type TChurnReportV1,
-	parseChurnManifestV2Json,
-	type TChurnManifestV2,
-	type TChurnManifestV2File,
+	parseChurnManifestJson,
 } from "./churnSchema.js"
 
 const CLIENT_SUBDIR = "public/_nuxt"
-const CLIENT_MANIFEST_NAME = "manifest"
-const CLIENT_MANIFEST_V2_NAME = "manifest.v2.json"
+const CLIENT_MANIFEST_NAME = "manifest.json"
 
 const DEFAULT_SSH_OPTS = [
 	"-4",
@@ -70,12 +69,7 @@ export interface TChurnMetrics {
 type TRemoteManifestResult =
 	| { kind: "none" }
 	| { kind: "error"; reason: string }
-	| { kind: "ok"; content: string }
-
-type TRemoteManifestV2Result =
-	| { kind: "none" }
-	| { kind: "error"; reason: string }
-	| { kind: "ok"; manifest: TChurnManifestV2; content: string }
+	| { kind: "ok"; manifest: TChurnManifest; content: string }
 
 interface TSshCommandResult {
 	code: number | null
@@ -99,62 +93,14 @@ export interface TChurnReportOptions extends TChurnOptions {
 
 export interface TBuildChurnReportInput {
 	metrics: TChurnMetrics
+	diagnosticsDiff: TManifestDiffResult
 	dryRun: boolean
-	diagnosticsDiff?: TManifestV2DiffResult
-	diagnosticsWarning?: string
 	profileName?: string
 	runMode?: string
 	producerName?: string
 	producerVersion?: string
 	reportId?: string
 	generatedAt?: string
-}
-
-export async function computeClientChurn(
-	opts: TChurnOptions,
-): Promise<TChurnMetrics> {
-	const buildDir = path.resolve(opts.buildDir)
-	const clientDir = path.join(buildDir, CLIENT_SUBDIR)
-
-	await ensureClientDirectory(clientDir)
-
-	let localManifestContent: string
-	try {
-		localManifestContent = await buildLocalManifestContent(clientDir)
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err)
-		throw churnError("CHURN_COMPUTE_FAILED", message)
-	}
-
-	const remoteManifestPath = buildRemoteManifestPath(opts.remoteDir)
-	const remoteManifest = await loadRemoteManifest(
-		opts.sshConnectionString,
-		remoteManifestPath,
-		DEFAULT_SSH_OPTS,
-	)
-
-	if (remoteManifest.kind === "error") {
-		throw churnError(
-			"CHURN_REMOTE_MANIFEST_FETCH_FAILED",
-			remoteManifest.reason,
-		)
-	}
-
-	const metrics = computeChurnFromManifests(
-		remoteManifest,
-		localManifestContent,
-	)
-
-	if (!opts.dryRun) {
-		await uploadRemoteManifest(
-			opts.sshConnectionString,
-			remoteManifestPath,
-			localManifestContent,
-			DEFAULT_SSH_OPTS,
-		)
-	}
-
-	return metrics
 }
 
 export async function computeClientChurnReport(
@@ -165,57 +111,37 @@ export async function computeClientChurnReport(
 
 	await ensureClientDirectory(clientDir)
 
+	let localManifest: TChurnManifest
 	let localManifestContent: string
-	let localManifestV2: TChurnManifestV2
-	let localManifestV2Content: string
 	try {
-		localManifestContent = await buildLocalManifestContent(clientDir)
-		localManifestV2 = await buildLocalManifestV2(clientDir)
-		localManifestV2Content = JSON.stringify(localManifestV2) + "\n"
+		localManifest = await buildLocalManifest(clientDir)
+		localManifestContent = JSON.stringify(localManifest) + "\n"
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		throw churnError("CHURN_COMPUTE_FAILED", message)
 	}
 
 	const remoteManifestPath = buildRemoteManifestPath(opts.remoteDir)
-	const remoteManifestV2Path = buildRemoteManifestV2Path(opts.remoteDir)
-	const remoteManifest = await loadRemoteManifest(
+	const remoteManifestRaw = await loadRemoteManifest(
 		opts.sshConnectionString,
 		remoteManifestPath,
 		DEFAULT_SSH_OPTS,
 	)
 
-	if (remoteManifest.kind === "error") {
+	if (remoteManifestRaw.kind === "error") {
 		throw churnError(
 			"CHURN_REMOTE_MANIFEST_FETCH_FAILED",
-			remoteManifest.reason,
+			remoteManifestRaw.reason,
 		)
 	}
 
-	const remoteManifestV2 = await loadRemoteManifestV2(
-		opts.sshConnectionString,
-		remoteManifestV2Path,
-		DEFAULT_SSH_OPTS,
-	)
+	const previousManifest =
+		remoteManifestRaw.kind === "ok"
+			? remoteManifestRaw.manifest
+			: buildEmptyManifest()
 
-	const metrics = computeChurnFromManifests(
-		remoteManifest,
-		localManifestContent,
-	)
-
-	let diagnosticsDiff: TManifestV2DiffResult | undefined
-	let diagnosticsWarning: string | undefined
-	if (remoteManifestV2.kind === "ok") {
-		diagnosticsDiff = compareManifestsV2(
-			remoteManifestV2.manifest,
-			localManifestV2,
-		)
-	} else if (remoteManifestV2.kind === "none") {
-		diagnosticsWarning =
-			"Enhanced diagnostics unavailable: no previous manifest.v2 baseline."
-	} else {
-		diagnosticsWarning = `Enhanced diagnostics unavailable: ${remoteManifestV2.reason}`
-	}
+	const metrics = computeChurnFromManifests(previousManifest, localManifest)
+	const diagnosticsDiff = compareManifestDiff(previousManifest, localManifest)
 
 	if (!opts.dryRun) {
 		await uploadRemoteManifest(
@@ -224,19 +150,12 @@ export async function computeClientChurnReport(
 			localManifestContent,
 			DEFAULT_SSH_OPTS,
 		)
-		await uploadRemoteManifestV2(
-			opts.sshConnectionString,
-			remoteManifestV2Path,
-			localManifestV2Content,
-			DEFAULT_SSH_OPTS,
-		)
 	}
 
 	return buildChurnReport({
 		metrics,
-		dryRun: opts.dryRun,
 		diagnosticsDiff,
-		diagnosticsWarning,
+		dryRun: opts.dryRun,
 		profileName: opts.profileName,
 		runMode: opts.runMode,
 		producerName: opts.producerName,
@@ -259,9 +178,14 @@ export function buildRemoteManifestPath(remoteDir: string): string {
 	return `${remoteDir}/.deploy/${CLIENT_MANIFEST_NAME}`
 }
 
-export function buildRemoteManifestV2Path(remoteDir: string): string {
-	// Keep the manifest outside the rsync'd .output tree so it survives deploys.
-	return `${remoteDir}/.deploy/${CLIENT_MANIFEST_V2_NAME}`
+function buildEmptyManifest(): TChurnManifest {
+	return {
+		schema: CHURN_MANIFEST_SCHEMA,
+		schemaVersion: CHURN_MANIFEST_SCHEMA_VERSION,
+		generatedAt: new Date().toISOString(),
+		root: CLIENT_SUBDIR,
+		files: [],
+	}
 }
 
 async function directoryExists(dir: string): Promise<boolean> {
@@ -273,27 +197,11 @@ async function directoryExists(dir: string): Promise<boolean> {
 	}
 }
 
-async function buildLocalManifestContent(clientDir: string): Promise<string> {
-	const files = await collectFiles(clientDir)
-	const entries: string[] = []
-
-	for (const file of files) {
-		const size = await getFileSize(file)
-		const normalizedPath = normalizeManifestPath(clientDir, file)
-		entries.push(`${String(size)}  ${normalizedPath}`)
-	}
-
-	entries.sort()
-
-	const content = entries.join("\n") + (entries.length ? "\n" : "")
-	return content
-}
-
-export async function buildLocalManifestV2(
+export async function buildLocalManifest(
 	clientDir: string,
-): Promise<TChurnManifestV2> {
+): Promise<TChurnManifest> {
 	const files = await collectFiles(clientDir)
-	const entries: TChurnManifestV2File[] = []
+	const entries: TChurnManifestFile[] = []
 
 	for (const file of files) {
 		const size = await getFileSize(file)
@@ -319,10 +227,10 @@ export async function buildLocalManifestV2(
 	}
 }
 
-export async function buildLocalManifestV2Content(
+export async function buildLocalManifestContent(
 	clientDir: string,
 ): Promise<string> {
-	const manifest = await buildLocalManifestV2(clientDir)
+	const manifest = await buildLocalManifest(clientDir)
 	return JSON.stringify(manifest) + "\n"
 }
 
@@ -440,10 +348,10 @@ function shellQuoteSingle(value: string): string {
 	return "'" + value.replace(/'/g, `'"'"'`) + "'"
 }
 
-async function loadRemoteManifest(
+export async function loadRemoteManifest(
 	sshConnectionString: string,
 	remoteManifestPath: string,
-	sshOpts: string[],
+	sshOpts: string[] = DEFAULT_SSH_OPTS,
 ): Promise<TRemoteManifestResult> {
 	const quotedPath = shellQuoteSingle(remoteManifestPath)
 
@@ -489,41 +397,27 @@ async function loadRemoteManifest(
 		}
 	}
 
-	return { kind: "ok", content: contentResult.stdout }
-}
-
-export async function loadRemoteManifestV2(
-	sshConnectionString: string,
-	remoteManifestPath: string,
-	sshOpts: string[] = DEFAULT_SSH_OPTS,
-): Promise<TRemoteManifestV2Result> {
-	const raw = await loadRemoteManifest(
-		sshConnectionString,
-		remoteManifestPath,
-		sshOpts,
-	)
-
-	if (raw.kind !== "ok") {
-		return raw
-	}
-
 	try {
-		const manifest = parseChurnManifestV2Json(raw.content)
-		return { kind: "ok", manifest, content: raw.content }
+		const manifest = parseChurnManifestJson(contentResult.stdout)
+		return {
+			kind: "ok",
+			manifest,
+			content: contentResult.stdout,
+		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		return {
 			kind: "error",
-			reason: `Invalid churn manifest v2 format at ${remoteManifestPath}: ${message}`,
+			reason: `Invalid churn manifest format at ${remoteManifestPath}: ${message}`,
 		}
 	}
 }
 
-async function uploadRemoteManifest(
+export async function uploadRemoteManifest(
 	sshConnectionString: string,
 	remoteManifestPath: string,
 	manifestContent: string,
-	sshOpts: string[],
+	sshOpts: string[] = DEFAULT_SSH_OPTS,
 ): Promise<void> {
 	const quotedPath = shellQuoteSingle(remoteManifestPath)
 	const quotedDir = shellQuoteSingle(path.dirname(remoteManifestPath))
@@ -554,20 +448,6 @@ async function uploadRemoteManifest(
 				`ssh exited with code ${String(result.code)} uploading manifest`,
 		)
 	}
-}
-
-export async function uploadRemoteManifestV2(
-	sshConnectionString: string,
-	remoteManifestPath: string,
-	manifestContent: string,
-	sshOpts: string[] = DEFAULT_SSH_OPTS,
-): Promise<void> {
-	await uploadRemoteManifest(
-		sshConnectionString,
-		remoteManifestPath,
-		manifestContent,
-		sshOpts,
-	)
 }
 
 function runSshCommand(
@@ -611,43 +491,28 @@ function runSshCommand(
 	})
 }
 
-export function parseManifest(content: string): Map<string, number> {
-	const map = new Map<string, number>()
-	const lines = content.split("\n")
-	for (const line of lines) {
-		const trimmed = line.trim()
-		if (!trimmed) continue
-		const [sizeStr, ...rest] = trimmed.split(/\s+/)
-		const filePath = rest.join(" ")
-		const size = Number(sizeStr)
-		if (!filePath || !Number.isFinite(size)) continue
-		map.set(filePath, size)
-	}
-	return map
+export function parseManifest(content: string): TChurnManifest {
+	return parseChurnManifestJson(content)
 }
 
-export function parseManifestV2(content: string): TChurnManifestV2 {
-	return parseChurnManifestV2Json(content)
+export interface TManifestFilePair {
+	oldFile: TChurnManifestFile
+	newFile: TChurnManifestFile
 }
 
-export interface TManifestV2FilePair {
-	oldFile: TChurnManifestV2File
-	newFile: TChurnManifestV2File
-}
-
-export interface TManifestV2DiffResult {
+export interface TManifestDiffResult {
 	categories: Required<TChurnDiagnosticsCategories>
-	reusedExact: TManifestV2FilePair[]
-	changedSamePath: TManifestV2FilePair[]
-	renamedSameHash: TManifestV2FilePair[]
-	newContent: TChurnManifestV2File[]
-	removed: TChurnManifestV2File[]
+	reusedExact: TManifestFilePair[]
+	changedSamePath: TManifestFilePair[]
+	renamedSameHash: TManifestFilePair[]
+	newContent: TChurnManifestFile[]
+	removed: TChurnManifestFile[]
 }
 
-export function compareManifestsV2(
-	oldManifest: TChurnManifestV2,
-	newManifest: TChurnManifestV2,
-): TManifestV2DiffResult {
+export function compareManifestDiff(
+	oldManifest: TChurnManifest,
+	newManifest: TChurnManifest,
+): TManifestDiffResult {
 	const sortedOld = [...oldManifest.files].sort((left, right) =>
 		left.path.localeCompare(right.path),
 	)
@@ -658,9 +523,9 @@ export function compareManifestsV2(
 	const oldByPath = new Map(sortedOld.map((file) => [file.path, file]))
 	const newByPath = new Map(sortedNew.map((file) => [file.path, file]))
 
-	const reusedExact: TManifestV2FilePair[] = []
-	const changedSamePath: TManifestV2FilePair[] = []
-	const addedCandidates: TChurnManifestV2File[] = []
+	const reusedExact: TManifestFilePair[] = []
+	const changedSamePath: TManifestFilePair[] = []
+	const addedCandidates: TChurnManifestFile[] = []
 
 	for (const newFile of sortedNew) {
 		const oldFile = oldByPath.get(newFile.path)
@@ -681,7 +546,7 @@ export function compareManifestsV2(
 		return !newByPath.has(oldFile.path)
 	})
 
-	const removedByHash = new Map<string, TChurnManifestV2File[]>()
+	const removedByHash = new Map<string, TChurnManifestFile[]>()
 	for (const oldFile of removedCandidates) {
 		const bucket = removedByHash.get(oldFile.sha256)
 		if (bucket) {
@@ -691,8 +556,8 @@ export function compareManifestsV2(
 		removedByHash.set(oldFile.sha256, [oldFile])
 	}
 
-	const renamedSameHash: TManifestV2FilePair[] = []
-	const newContent: TChurnManifestV2File[] = []
+	const renamedSameHash: TManifestFilePair[] = []
+	const newContent: TChurnManifestFile[] = []
 	const renamedOldPaths = new Set<string>()
 
 	for (const newFile of addedCandidates) {
@@ -733,7 +598,7 @@ export function compareManifestsV2(
 }
 
 function buildCategoryTotalsFromPairs(
-	pairs: TManifestV2FilePair[],
+	pairs: TManifestFilePair[],
 ): TChurnCategoryTotals {
 	let bytes = 0
 	for (const pair of pairs) {
@@ -743,7 +608,7 @@ function buildCategoryTotalsFromPairs(
 }
 
 function buildCategoryTotalsFromFiles(
-	files: TChurnManifestV2File[],
+	files: TChurnManifestFile[],
 ): TChurnCategoryTotals {
 	let bytes = 0
 	for (const file of files) {
@@ -753,7 +618,7 @@ function buildCategoryTotalsFromFiles(
 }
 
 function buildCategoryTotalsFromRemovedFiles(
-	files: TChurnManifestV2File[],
+	files: TChurnManifestFile[],
 ): TChurnCategoryTotals {
 	let bytes = 0
 	for (const file of files) {
@@ -762,111 +627,16 @@ function buildCategoryTotalsFromRemovedFiles(
 	return { files: files.length, bytes }
 }
 
-export function buildChurnReport(
-	input: TBuildChurnReportInput,
-): TChurnReportV1 {
-	const baselineAvailable =
-		input.metrics.totalOldFiles > 0 || input.metrics.totalOldBytes > 0
-	const capabilities = input.diagnosticsDiff
-		? {
-				hashDiff: true,
-				renameDetection: "hash-match-v1",
-				assetTyping: "extension-v1",
-				ownerGrouping: "heuristic-v1",
-			}
-		: {
-				hashDiff: false,
-				renameDetection: "unavailable",
-				assetTyping: "unavailable",
-				ownerGrouping: "unavailable",
-			}
-
-	const diagnostics = input.diagnosticsDiff
-		? buildReportDiagnostics(input.diagnosticsDiff)
-		: undefined
-	const warnings = input.diagnosticsWarning ? [input.diagnosticsWarning] : []
-
-	return {
-		schema: CHURN_REPORT_SCHEMA,
-		schemaVersion: CHURN_REPORT_SCHEMA_VERSION,
-		metricSetVersion: CHURN_REPORT_METRIC_SET_VERSION,
-		reportId: input.reportId ?? randomUUID(),
-		generatedAt: input.generatedAt ?? new Date().toISOString(),
-		producer: {
-			name: input.producerName ?? "@dodefey/deploy",
-			version: input.producerVersion ?? "unknown",
-		},
-		run: {
-			profile: input.profileName ?? "unknown",
-			mode: input.runMode ?? "deploy",
-			dryRun: input.dryRun,
-		},
-		baseline: {
-			available: baselineAvailable,
-			kind: baselineAvailable ? "previous_deploy" : "none",
-			distance: baselineAvailable ? 1 : 0,
-		},
-		capabilities,
-		core: {
-			files: {
-				totalOld: input.metrics.totalOldFiles,
-				totalNew: input.metrics.totalNewFiles,
-				stable: input.metrics.stableFiles,
-				changed: input.metrics.changedFiles,
-				added: input.metrics.addedFiles,
-				removed: input.metrics.removedFiles,
-			},
-			bytes: {
-				totalOld: input.metrics.totalOldBytes,
-				totalNew: input.metrics.totalNewBytes,
-				stable: input.metrics.stableBytes,
-				changed: input.metrics.changedBytes,
-				added: input.metrics.addedBytes,
-				removed: input.metrics.removedBytes,
-			},
-			percent: {
-				downloadImpactFiles: input.metrics.downloadImpactFilesPercent,
-				cacheReuseFiles: input.metrics.cacheReuseFilesPercent,
-				downloadImpactBytes: input.metrics.downloadImpactBytesPercent,
-				cacheReuseBytes: input.metrics.cacheReuseBytesPercent,
-			},
-		},
-		diagnostics,
-		quality: {
-			comparableClass: input.diagnosticsDiff
-				? "core-1+hash-v1"
-				: "core-1",
-			warnings,
-		},
-	}
-}
-
-function buildReportDiagnostics(
-	diff: TManifestV2DiffResult,
-): NonNullable<TChurnReportV1["diagnostics"]> {
-	const downloadBytes =
-		diff.categories.changed_same_path.bytes +
-		diff.categories.renamed_same_hash.bytes +
-		diff.categories.new_content.bytes
-	const renameNoiseBytes = diff.categories.renamed_same_hash.bytes
-	const renameNoisePercentOfDownloadBytes =
-		downloadBytes > 0 ? (renameNoiseBytes * 100) / downloadBytes : 0
-
-	return {
-		categories: diff.categories,
-		avoidableChurn: {
-			renameNoiseBytes,
-			renameNoisePercentOfDownloadBytes,
-		},
-	}
-}
-
-export function compareManifests(
-	oldContent: string,
-	newContent: string,
+export function compareManifestMetrics(
+	oldManifest: TChurnManifest,
+	newManifest: TChurnManifest,
 ): TChurnMetrics {
-	const oldMap = parseManifest(oldContent)
-	const newMap = parseManifest(newContent)
+	const oldByPath = new Map(
+		oldManifest.files.map((file) => [file.path, file]),
+	)
+	const newByPath = new Map(
+		newManifest.files.map((file) => [file.path, file]),
+	)
 
 	let stableFiles = 0
 	let changedFiles = 0
@@ -880,36 +650,40 @@ export function compareManifests(
 	let addedBytes = 0
 	let removedBytes = 0
 
-	for (const size of oldMap.values()) {
-		totalOldBytes += size
+	for (const file of oldManifest.files) {
+		totalOldBytes += file.size
 	}
-	for (const size of newMap.values()) {
-		totalNewBytes += size
+	for (const file of newManifest.files) {
+		totalNewBytes += file.size
 	}
 
-	for (const [filePath, newSize] of newMap.entries()) {
-		const oldSize = oldMap.get(filePath)
-		if (oldSize === undefined) {
-			addedFiles++
-			addedBytes += newSize
-		} else if (oldSize === newSize) {
-			stableFiles++
-			stableBytes += newSize
-		} else {
-			changedFiles++
-			changedBytes += newSize
+	for (const [filePath, newFile] of newByPath.entries()) {
+		const oldFile = oldByPath.get(filePath)
+		if (!oldFile) {
+			addedFiles += 1
+			addedBytes += newFile.size
+			continue
+		}
+
+		if (oldFile.size === newFile.size) {
+			stableFiles += 1
+			stableBytes += newFile.size
+			continue
+		}
+
+		changedFiles += 1
+		changedBytes += newFile.size
+	}
+
+	for (const [filePath, oldFile] of oldByPath.entries()) {
+		if (!newByPath.has(filePath)) {
+			removedFiles += 1
+			removedBytes += oldFile.size
 		}
 	}
 
-	for (const [filePath, oldSize] of oldMap.entries()) {
-		if (!newMap.has(filePath)) {
-			removedFiles++
-			removedBytes += oldSize
-		}
-	}
-
-	const totalOldFiles = oldMap.size
-	const totalNewFiles = newMap.size
+	const totalOldFiles = oldByPath.size
+	const totalNewFiles = newByPath.size
 
 	const downloadImpactFilesPercent =
 		totalNewFiles > 0
@@ -947,20 +721,99 @@ export function compareManifests(
 	}
 }
 
-type TResolvedManifest = Exclude<TRemoteManifestResult, { kind: "error" }>
-
 export function computeChurnFromManifests(
-	remote: TResolvedManifest,
-	localManifestContent: string,
+	previousManifest: TChurnManifest,
+	currentManifest: TChurnManifest,
 ): TChurnMetrics {
 	try {
-		return compareManifests(
-			remote.kind === "none" ? "" : remote.content,
-			localManifestContent,
-		)
+		return compareManifestMetrics(previousManifest, currentManifest)
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		throw churnError("CHURN_COMPUTE_FAILED", message)
+	}
+}
+
+export function buildChurnReport(
+	input: TBuildChurnReportInput,
+): TChurnReportV1 {
+	const baselineAvailable =
+		input.metrics.totalOldFiles > 0 || input.metrics.totalOldBytes > 0
+
+	return {
+		schema: CHURN_REPORT_SCHEMA,
+		schemaVersion: CHURN_REPORT_SCHEMA_VERSION,
+		metricSetVersion: CHURN_REPORT_METRIC_SET_VERSION,
+		reportId: input.reportId ?? randomUUID(),
+		generatedAt: input.generatedAt ?? new Date().toISOString(),
+		producer: {
+			name: input.producerName ?? "@dodefey/deploy",
+			version: input.producerVersion ?? "unknown",
+		},
+		run: {
+			profile: input.profileName ?? "unknown",
+			mode: input.runMode ?? "deploy",
+			dryRun: input.dryRun,
+		},
+		baseline: {
+			available: baselineAvailable,
+			kind: baselineAvailable ? "previous_deploy" : "none",
+			distance: baselineAvailable ? 1 : 0,
+		},
+		capabilities: {
+			hashDiff: true,
+			renameDetection: "hash-match",
+			assetTyping: "extension",
+			ownerGrouping: "heuristic",
+		},
+		core: {
+			files: {
+				totalOld: input.metrics.totalOldFiles,
+				totalNew: input.metrics.totalNewFiles,
+				stable: input.metrics.stableFiles,
+				changed: input.metrics.changedFiles,
+				added: input.metrics.addedFiles,
+				removed: input.metrics.removedFiles,
+			},
+			bytes: {
+				totalOld: input.metrics.totalOldBytes,
+				totalNew: input.metrics.totalNewBytes,
+				stable: input.metrics.stableBytes,
+				changed: input.metrics.changedBytes,
+				added: input.metrics.addedBytes,
+				removed: input.metrics.removedBytes,
+			},
+			percent: {
+				downloadImpactFiles: input.metrics.downloadImpactFilesPercent,
+				cacheReuseFiles: input.metrics.cacheReuseFilesPercent,
+				downloadImpactBytes: input.metrics.downloadImpactBytesPercent,
+				cacheReuseBytes: input.metrics.cacheReuseBytesPercent,
+			},
+		},
+		diagnostics: buildReportDiagnostics(input.diagnosticsDiff),
+		quality: {
+			comparableClass: "core-1+hash",
+			warnings: [],
+		},
+	}
+}
+
+function buildReportDiagnostics(
+	diff: TManifestDiffResult,
+): NonNullable<TChurnReportV1["diagnostics"]> {
+	const downloadBytes =
+		diff.categories.changed_same_path.bytes +
+		diff.categories.renamed_same_hash.bytes +
+		diff.categories.new_content.bytes
+	const renameNoiseBytes = diff.categories.renamed_same_hash.bytes
+	const renameNoisePercentOfDownloadBytes =
+		downloadBytes > 0 ? (renameNoiseBytes * 100) / downloadBytes : 0
+
+	return {
+		categories: diff.categories,
+		avoidableChurn: {
+			renameNoiseBytes,
+			renameNoisePercentOfDownloadBytes,
+		},
 	}
 }
 

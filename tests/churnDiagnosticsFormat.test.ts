@@ -31,9 +31,9 @@ function baseReport(): TChurnReportV1 {
 		},
 		capabilities: {
 			hashDiff: true,
-			renameDetection: "hash-match-v1",
-			assetTyping: "extension-v1",
-			ownerGrouping: "heuristic-v1",
+			renameDetection: "hash-match",
+			assetTyping: "extension",
+			ownerGrouping: "heuristic",
 		},
 		core: {
 			files: {
@@ -93,7 +93,7 @@ function baseReport(): TChurnReportV1 {
 			recommendations: ["Investigate filename churn in vendor chunking."],
 		},
 		quality: {
-			comparableClass: "core-1+hash-v1",
+			comparableClass: "core-1+hash",
 			warnings: [],
 		},
 	}
@@ -137,13 +137,13 @@ describe("formatChurnReportDiagnostics", () => {
 		const report = baseReport()
 		delete report.diagnostics
 		report.quality.warnings = [
-			"Enhanced diagnostics unavailable: no previous manifest.v2 baseline.",
+			"Diagnostics unavailable: report has no diagnostics payload.",
 		]
 
 		const output = formatChurnReportDiagnostics(report, { mode: "compact" })
 		expect(output).toContain("Churn diagnostics")
 		expect(output).toContain(
-			"Enhanced diagnostics unavailable: no previous manifest.v2 baseline.",
+			"Diagnostics unavailable: report has no diagnostics payload.",
 		)
 	})
 

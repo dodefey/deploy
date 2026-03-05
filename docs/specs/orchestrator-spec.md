@@ -79,7 +79,7 @@ Use this `deploy` object for all subsequent calls in `src/cli.ts`.
 
 ### 2.1 Refactor helper signatures to use `TDeployArgs`
 
-Helpers should accept `TDeployArgs` instead of ad-hoc shapes (e.g. `runTestPhase`, `runBuildPhase`, `runSyncPhase`, `runPm2Phase`, `runChurnPhase`, `runChurnOnlyMode`). Inside each helper, destructure only what is needed and keep the module calls (`runTests`, `runBuild`, `syncBuild`, `updatePM2App`, `computeClientChurn`) unchanged aside from mapping fields.
+Helpers should accept `TDeployArgs` instead of ad-hoc shapes (e.g. `runTestPhase`, `runBuildPhase`, `runSyncPhase`, `runPm2Phase`, `runChurnPhase`, `runChurnOnlyMode`). Inside each helper, destructure only what is needed and keep the module calls (`runTests`, `runBuild`, `syncBuild`, `updatePM2App`, `computeClientChurnReport`) unchanged aside from mapping fields.
 
 ### 2.2 Add explicit phase helpers
 
@@ -115,7 +115,7 @@ async function runChurnOnlyMode(values: TDeployArgs): Promise<void> { ... }
     - On error, treat as **non-fatal**, via the new non-fatal error helper.
 
 - `runChurnPhase` (full deploy mode)
-    - Call `handleChurn(values)` (which wraps `computeClientChurn`) with the same options as before.
+    - Call `handleChurn(values)` (which wraps `computeClientChurnReport`) with the same options as before.
     - On error, treat as **non-fatal** (deploy still considered successful).
 
 - `runChurnOnlyMode`
@@ -243,12 +243,10 @@ try {
 - Preserve default semantics:
     - Existing build/sync/PM2/churn phase ordering.
     - Fatal vs non-fatal phase behavior.
-    - Legacy churn summary behavior when diagnostics are not requested.
 
-- Additive churn enhancements are allowed:
-    - CLI flags for diagnostics mode, top-N, and report output.
-    - Report-path churn execution when diagnostics or report output is requested.
-    - Diagnostics formatting output that does not replace the legacy summary.
+- Churn diagnostics/report output behavior:
+    - CLI flags for diagnostics mode, top-N, and report output stay supported.
+    - Churn computation always uses the canonical report path.
 
 - You **may**:
     - Move existing logic from `run()` into helpers.

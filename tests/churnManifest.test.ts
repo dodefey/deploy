@@ -6,12 +6,12 @@ import * as path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 
 import {
-	buildLocalManifestV2,
-	buildLocalManifestV2Content,
-	buildRemoteManifestV2Path,
+	buildLocalManifest,
+	buildLocalManifestContent,
+	buildRemoteManifestPath,
 	detectAssetType,
 	inferOwnerGroup,
-	parseManifestV2,
+	parseManifest,
 } from "../src/churn"
 import {
 	CHURN_MANIFEST_SCHEMA,
@@ -31,7 +31,7 @@ function sha256(content: string): string {
 	return createHash("sha256").update(content, "utf8").digest("hex")
 }
 
-describe("churn manifest v2 helpers", () => {
+describe("churn manifest helpers", () => {
 	const tempDirs: string[] = []
 
 	afterEach(async () => {
@@ -41,9 +41,9 @@ describe("churn manifest v2 helpers", () => {
 		tempDirs.length = 0
 	})
 
-	it("builds remote manifest v2 path under .deploy", () => {
-		const remotePath = buildRemoteManifestV2Path("/var/www/app")
-		expect(remotePath).toBe("/var/www/app/.deploy/manifest.v2.json")
+	it("builds remote manifest path under .deploy", () => {
+		const remotePath = buildRemoteManifestPath("/var/www/app")
+		expect(remotePath).toBe("/var/www/app/.deploy/manifest.json")
 	})
 
 	it("classifies asset types by extension", () => {
@@ -63,8 +63,8 @@ describe("churn manifest v2 helpers", () => {
 		expect(inferOwnerGroup("./assets/logo.svg")).toBe("unknown")
 	})
 
-	it("builds deterministic local manifest v2 with enriched file data", async () => {
-		const dir = await createTempDir("deploy-churn-v2-")
+	it("builds deterministic local manifest with enriched file data", async () => {
+		const dir = await createTempDir("deploy-churn-manifest-")
 		tempDirs.push(dir)
 
 		const files = [
@@ -98,7 +98,7 @@ describe("churn manifest v2 helpers", () => {
 			await ensureFile(path.join(dir, file.relativePath), file.content)
 		}
 
-		const manifest = await buildLocalManifestV2(dir)
+		const manifest = await buildLocalManifest(dir)
 
 		expect(manifest.schema).toBe(CHURN_MANIFEST_SCHEMA)
 		expect(manifest.schemaVersion).toBe(CHURN_MANIFEST_SCHEMA_VERSION)
@@ -127,15 +127,15 @@ describe("churn manifest v2 helpers", () => {
 		}
 	})
 
-	it("serializes and parses manifest v2 content", async () => {
-		const dir = await createTempDir("deploy-churn-v2-content-")
+	it("serializes and parses manifest content", async () => {
+		const dir = await createTempDir("deploy-churn-manifest-content-")
 		tempDirs.push(dir)
 		await ensureFile(path.join(dir, "pages/index.js"), "export default 1\n")
 
-		const content = await buildLocalManifestV2Content(dir)
+		const content = await buildLocalManifestContent(dir)
 		expect(content.endsWith("\n")).toBe(true)
 
-		const parsed = parseManifestV2(content)
+		const parsed = parseManifest(content)
 		expect(parsed.schema).toBe(CHURN_MANIFEST_SCHEMA)
 		expect(parsed.files).toHaveLength(1)
 		expect(parsed.files[0]?.path).toBe("./pages/index.js")

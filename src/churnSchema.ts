@@ -1,13 +1,13 @@
 export const CHURN_MANIFEST_SCHEMA = "com.dodefey.churn-manifest"
-export const CHURN_MANIFEST_SCHEMA_MAJOR = 2
-export const CHURN_MANIFEST_SCHEMA_VERSION = "2.0.0"
+export const CHURN_MANIFEST_SCHEMA_MAJOR = 1
+export const CHURN_MANIFEST_SCHEMA_VERSION = "1.0.0"
 
 export const CHURN_REPORT_SCHEMA = "com.dodefey.churn-report"
 export const CHURN_REPORT_SCHEMA_MAJOR = 1
 export const CHURN_REPORT_SCHEMA_VERSION = "1.0.0"
 export const CHURN_REPORT_METRIC_SET_VERSION = "core-1"
 
-export interface TChurnManifestV2File {
+export interface TChurnManifestFile {
 	path: string
 	size: number
 	sha256: string
@@ -15,12 +15,12 @@ export interface TChurnManifestV2File {
 	ownerGroup: string
 }
 
-export interface TChurnManifestV2 {
+export interface TChurnManifest {
 	schema: typeof CHURN_MANIFEST_SCHEMA
 	schemaVersion: string
 	generatedAt: string
 	root: string
-	files: TChurnManifestV2File[]
+	files: TChurnManifestFile[]
 }
 
 export interface TChurnReportProducer {
@@ -208,10 +208,7 @@ function requireCompatibleMajorVersion(
 	}
 }
 
-function parseManifestFile(
-	value: unknown,
-	label: string,
-): TChurnManifestV2File {
+function parseManifestFile(value: unknown, label: string): TChurnManifestFile {
 	const obj = requireRecord(value, label)
 	return {
 		path: readString(obj, "path", label),
@@ -257,7 +254,7 @@ function parseAttributionBucket(
 	}
 }
 
-export function parseChurnManifestV2(value: unknown): TChurnManifestV2 {
+export function parseChurnManifest(value: unknown): TChurnManifest {
 	const root = requireRecord(value, "manifest")
 	const schema = readString(root, "schema", "manifest")
 	if (schema !== CHURN_MANIFEST_SCHEMA) {
@@ -289,7 +286,7 @@ export function parseChurnManifestV2(value: unknown): TChurnManifestV2 {
 	}
 }
 
-export function parseChurnManifestV2Json(content: string): TChurnManifestV2 {
+export function parseChurnManifestJson(content: string): TChurnManifest {
 	let parsed: unknown
 	try {
 		parsed = JSON.parse(content)
@@ -300,7 +297,7 @@ export function parseChurnManifestV2Json(content: string): TChurnManifestV2 {
 			}`,
 		)
 	}
-	return parseChurnManifestV2(parsed)
+	return parseChurnManifest(parsed)
 }
 
 export function parseChurnReportV1(value: unknown): TChurnReportV1 {
@@ -348,7 +345,11 @@ export function parseChurnReportV1(value: unknown): TChurnReportV1 {
 		"report.capabilities",
 	)
 	const capabilities: TChurnReportCapabilities = {
-		hashDiff: readBoolean(capabilitiesObj, "hashDiff", "report.capabilities"),
+		hashDiff: readBoolean(
+			capabilitiesObj,
+			"hashDiff",
+			"report.capabilities",
+		),
 		renameDetection: readString(
 			capabilitiesObj,
 			"renameDetection",
@@ -369,27 +370,64 @@ export function parseChurnReportV1(value: unknown): TChurnReportV1 {
 	const coreObj = requireRecord(root.core, "report.core")
 	const coreFilesObj = requireRecord(coreObj.files, "report.core.files")
 	const coreBytesObj = requireRecord(coreObj.bytes, "report.core.bytes")
-	const corePercentObj = requireRecord(
-		coreObj.percent,
-		"report.core.percent",
-	)
+	const corePercentObj = requireRecord(coreObj.percent, "report.core.percent")
 
 	const core: TChurnReportCore = {
 		files: {
-			totalOld: readFiniteNumber(coreFilesObj, "totalOld", "report.core.files"),
-			totalNew: readFiniteNumber(coreFilesObj, "totalNew", "report.core.files"),
-			stable: readFiniteNumber(coreFilesObj, "stable", "report.core.files"),
-			changed: readFiniteNumber(coreFilesObj, "changed", "report.core.files"),
+			totalOld: readFiniteNumber(
+				coreFilesObj,
+				"totalOld",
+				"report.core.files",
+			),
+			totalNew: readFiniteNumber(
+				coreFilesObj,
+				"totalNew",
+				"report.core.files",
+			),
+			stable: readFiniteNumber(
+				coreFilesObj,
+				"stable",
+				"report.core.files",
+			),
+			changed: readFiniteNumber(
+				coreFilesObj,
+				"changed",
+				"report.core.files",
+			),
 			added: readFiniteNumber(coreFilesObj, "added", "report.core.files"),
-			removed: readFiniteNumber(coreFilesObj, "removed", "report.core.files"),
+			removed: readFiniteNumber(
+				coreFilesObj,
+				"removed",
+				"report.core.files",
+			),
 		},
 		bytes: {
-			totalOld: readFiniteNumber(coreBytesObj, "totalOld", "report.core.bytes"),
-			totalNew: readFiniteNumber(coreBytesObj, "totalNew", "report.core.bytes"),
-			stable: readFiniteNumber(coreBytesObj, "stable", "report.core.bytes"),
-			changed: readFiniteNumber(coreBytesObj, "changed", "report.core.bytes"),
+			totalOld: readFiniteNumber(
+				coreBytesObj,
+				"totalOld",
+				"report.core.bytes",
+			),
+			totalNew: readFiniteNumber(
+				coreBytesObj,
+				"totalNew",
+				"report.core.bytes",
+			),
+			stable: readFiniteNumber(
+				coreBytesObj,
+				"stable",
+				"report.core.bytes",
+			),
+			changed: readFiniteNumber(
+				coreBytesObj,
+				"changed",
+				"report.core.bytes",
+			),
 			added: readFiniteNumber(coreBytesObj, "added", "report.core.bytes"),
-			removed: readFiniteNumber(coreBytesObj, "removed", "report.core.bytes"),
+			removed: readFiniteNumber(
+				coreBytesObj,
+				"removed",
+				"report.core.bytes",
+			),
 		},
 		percent: {
 			downloadImpactFiles: readFiniteNumber(
@@ -417,7 +455,10 @@ export function parseChurnReportV1(value: unknown): TChurnReportV1 {
 
 	let diagnostics: TChurnReportDiagnostics | undefined
 	if (root.diagnostics !== undefined) {
-		const diagnosticsObj = requireRecord(root.diagnostics, "report.diagnostics")
+		const diagnosticsObj = requireRecord(
+			root.diagnostics,
+			"report.diagnostics",
+		)
 		const categoriesObj = requireRecord(
 			diagnosticsObj.categories,
 			"report.diagnostics.categories",
@@ -571,7 +612,11 @@ export function parseChurnReportV1(value: unknown): TChurnReportV1 {
 	const qualityObj = requireRecord(root.quality, "report.quality")
 	const warnings = readArray(qualityObj, "warnings", "report.quality")
 	const quality: TChurnReportQuality = {
-		comparableClass: readString(qualityObj, "comparableClass", "report.quality"),
+		comparableClass: readString(
+			qualityObj,
+			"comparableClass",
+			"report.quality",
+		),
 		warnings: warnings.map((entry, index) => {
 			if (typeof entry !== "string") {
 				throw new Error(

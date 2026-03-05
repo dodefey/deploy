@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-- Initial entry.
+- breaking change: churn analysis now uses a single canonical manifest/report pipeline with `${remoteDir}/.deploy/manifest.json`; legacy churn paths and `v2` naming were removed.
 
 ## v0.1.5 - 2025-12-09
 

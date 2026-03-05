@@ -119,17 +119,7 @@ If `--churnOnly` is set:
 
 ### 5.5 Churn (shared logic)
 
-`runChurnAnalysis` chooses path by:
-
-- report path when `churnDiagnostics !== "off"` OR `churnReportOut` is set.
-- legacy path otherwise.
-
-Legacy path:
-
-- Calls `computeClientChurn`.
-- Logs legacy churn summary.
-
-Report path:
+`runChurnAnalysis` uses a single canonical churn path:
 
 - Calls `computeClientChurnReport`.
 - Logs churn summary derived from report `core`.
@@ -165,11 +155,11 @@ See `docs/specs/exit-semantics.md` for full rules.
 
 ---
 
-## 8. Backward Compatibility Guarantees
+## 8. Churn Contract
 
-- Default deploy behavior remains unchanged when diagnostics/report options are not requested.
-- Legacy churn summary remains present and metric-compatible.
-- Enhanced churn diagnostics/report output is additive and opt-in.
+- Churn always computes canonical report data.
+- Summary output always comes from report `core`.
+- Diagnostics display remains optional via `churnDiagnostics`.
 
 ---
 

@@ -105,9 +105,7 @@ node dist/cli.js deploy \
 3. **Build**: Run the profile-defined build command (via `runBuild`); stdout mode per `--verbose`.
 4. **Sync**: `rsync` local `.output` to `${remoteDir}/.output` (or override), honors `--dryRun`.
 5. **PM2**: `pm2 startOrReload` (or `reboot`) app in `remoteDir`; reports instance count.
-6. **Churn**:
-    - Default path (backward-compatible): compute summary metrics vs `${remoteDir}/.deploy/manifest`; upload updated manifest unless `--dryRun`.
-    - Enhanced path (when diagnostics/report output is requested): also use `${remoteDir}/.deploy/manifest.v2.json` for hash-aware diagnostics and write a canonical report payload.
+6. **Churn**: compute canonical churn report against `${remoteDir}/.deploy/manifest.json`, log churn summary from report core metrics, optionally render diagnostics, and upload updated baseline unless `--dryRun`.
 
 ## Scripts
 
@@ -132,8 +130,7 @@ node dist/cli.js deploy \
 - **No profile found**: ensure `./profiles.json` exists in the directory where you run the CLI (or set `DEPLOY_PROFILES_PATH`) and that it has at least one profile with unique names.
 - **PM2 app missing**: check `pm2AppName` matches the ecosystem config on the server.
 - **rsync errors**: verify SSH connectivity and remote write permissions to `${remoteDir}/.output`.
-- **Churn baseline missing**: first deploy will store a baseline manifest; subsequent runs compare against it.
-- **Enhanced diagnostics unavailable**: a first enhanced run may lack `manifest.v2.json` baseline; core churn still works and report warnings explain diagnostics gaps.
+- **Churn baseline missing**: first deploy will create `${remoteDir}/.deploy/manifest.json`; subsequent runs compare against it.
 
 ## License
 

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest"
 
-import { compareManifestsV2 } from "../src/churn"
+import { compareManifestDiff } from "../src/churn"
 import {
 	CHURN_MANIFEST_SCHEMA,
 	CHURN_MANIFEST_SCHEMA_VERSION,
-	type TChurnManifestV2,
-	type TChurnManifestV2File,
+	type TChurnManifest,
+	type TChurnManifestFile,
 } from "../src/churnSchema"
 
-function buildManifest(files: TChurnManifestV2File[]): TChurnManifestV2 {
+function buildManifest(files: TChurnManifestFile[]): TChurnManifest {
 	return {
 		schema: CHURN_MANIFEST_SCHEMA,
 		schemaVersion: CHURN_MANIFEST_SCHEMA_VERSION,
@@ -18,7 +18,7 @@ function buildManifest(files: TChurnManifestV2File[]): TChurnManifestV2 {
 	}
 }
 
-describe("compareManifestsV2", () => {
+describe("compareManifestDiff", () => {
 	it("classifies exact reuse", () => {
 		const manifest = buildManifest([
 			{
@@ -30,7 +30,7 @@ describe("compareManifestsV2", () => {
 			},
 		])
 
-		const diff = compareManifestsV2(manifest, manifest)
+		const diff = compareManifestDiff(manifest, manifest)
 
 		expect(diff.categories).toEqual({
 			reused_exact: { files: 1, bytes: 100 },
@@ -66,7 +66,7 @@ describe("compareManifestsV2", () => {
 			},
 		])
 
-		const diff = compareManifestsV2(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
 		expect(diff.categories.changed_same_path).toEqual({
 			files: 1,
 			bytes: 120,
@@ -110,7 +110,7 @@ describe("compareManifestsV2", () => {
 			},
 		])
 
-		const diff = compareManifestsV2(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
 		expect(diff.categories).toEqual({
 			reused_exact: { files: 0, bytes: 0 },
 			changed_same_path: { files: 0, bytes: 0 },
@@ -151,7 +151,7 @@ describe("compareManifestsV2", () => {
 			},
 		])
 
-		const diff = compareManifestsV2(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
 		expect(diff.renamedSameHash).toHaveLength(1)
 		expect(diff.renamedSameHash[0]?.oldFile.path).toBe("./a-old.js")
 		expect(diff.renamedSameHash[0]?.newFile.path).toBe("./m-new.js")
@@ -220,7 +220,7 @@ describe("compareManifestsV2", () => {
 			},
 		])
 
-		const diff = compareManifestsV2(oldManifest, newManifest)
+		const diff = compareManifestDiff(oldManifest, newManifest)
 		const categories = diff.categories
 
 		const totalNewFilesFromCategories =
@@ -241,8 +241,14 @@ describe("compareManifestsV2", () => {
 			categories.removed.files
 		const totalOldBytesFromDiff =
 			diff.reusedExact.reduce((sum, pair) => sum + pair.oldFile.size, 0) +
-			diff.changedSamePath.reduce((sum, pair) => sum + pair.oldFile.size, 0) +
-			diff.renamedSameHash.reduce((sum, pair) => sum + pair.oldFile.size, 0) +
+			diff.changedSamePath.reduce(
+				(sum, pair) => sum + pair.oldFile.size,
+				0,
+			) +
+			diff.renamedSameHash.reduce(
+				(sum, pair) => sum + pair.oldFile.size,
+				0,
+			) +
 			diff.removed.reduce((sum, file) => sum + file.size, 0)
 
 		const expectedNewFiles = newManifest.files.length

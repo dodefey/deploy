@@ -5,8 +5,8 @@ import * as path from "node:path"
 import { cli, define } from "gunshi"
 import type { TBuildOutputMode } from "./build.js"
 import { runBuild } from "./build.js"
-import type { TChurnMetrics, TChurnOptions } from "./churn.js"
-import { computeClientChurn, computeClientChurnReport } from "./churn.js"
+import type { TChurnMetrics } from "./churn.js"
+import { computeClientChurnReport } from "./churn.js"
 import type { TConfigErrorCode, TResolvedConfig } from "./config.js"
 import { listProfiles, resolveProfile } from "./config.js"
 import { formatChurnReportDiagnostics } from "./churnDiagnosticsFormat.js"
@@ -352,22 +352,11 @@ async function runChurnAnalysis(
 	runMode: "deploy" | "churnOnly",
 ): Promise<void> {
 	const mode = values.churnDiagnostics ?? "off"
-	const shouldUseReportPath = mode !== "off" || Boolean(values.churnReportOut)
-	const options: TChurnOptions = {
+	const report = await computeClientChurnReport({
 		buildDir: values.buildDir,
 		sshConnectionString: values.sshConnectionString,
 		remoteDir: values.remoteDir,
 		dryRun: values.dryRun,
-	}
-
-	if (!shouldUseReportPath) {
-		const metrics = await computeClientChurn(options)
-		logChurnSummary(metrics, { dryRun: values.dryRun })
-		return
-	}
-
-	const report = await computeClientChurnReport({
-		...options,
 		profileName: values.profileName,
 		runMode,
 	})

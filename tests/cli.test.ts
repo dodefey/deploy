@@ -7,7 +7,6 @@ type MockConfig = {
 	runBuildImpl?: () => any
 	runTestsImpl?: () => any
 	syncBuildImpl?: () => any
-	computeClientChurnImpl?: () => any
 	computeClientChurnReportImpl?: () => any
 	formatChurnReportDiagnosticsImpl?: () => any
 	gunshiCliImpl?: () => any
@@ -36,9 +35,9 @@ function buildReportFixture() {
 		},
 		capabilities: {
 			hashDiff: true,
-			renameDetection: "hash-match-v1",
-			assetTyping: "extension-v1",
-			ownerGrouping: "heuristic-v1",
+			renameDetection: "hash-match",
+			assetTyping: "extension",
+			ownerGrouping: "heuristic",
 		},
 		core: {
 			files: {
@@ -74,7 +73,7 @@ function buildReportFixture() {
 			},
 		},
 		quality: {
-			comparableClass: "core-1+hash-v1",
+			comparableClass: "core-1+hash",
 			warnings: [],
 		},
 	}
@@ -140,12 +139,6 @@ function setupMocks(config: MockConfig = {}) {
 			),
 	}))
 	vi.doMock("./../src/churn.ts", () => ({
-		computeClientChurn: vi
-			.fn()
-			.mockImplementation(
-				config.computeClientChurnImpl ??
-					(() => Promise.resolve("metrics")),
-			),
 		computeClientChurnReport: vi
 			.fn()
 			.mockImplementation(
@@ -587,7 +580,7 @@ describe("src/cli.ts wiring", () => {
 	})
 
 	it("deployCommand.run calls churn-only path when churnOnly is true", async () => {
-		const computeMock = vi.fn().mockResolvedValue("metrics")
+		const computeMock = vi.fn().mockResolvedValue(buildReportFixture())
 		const runBuildMock = vi.fn()
 		const syncMock = vi.fn()
 		const pm2Mock = vi.fn()
@@ -604,7 +597,7 @@ describe("src/cli.ts wiring", () => {
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
 			}),
-			computeClientChurnImpl: computeMock,
+			computeClientChurnReportImpl: computeMock,
 			runBuildImpl: runBuildMock,
 			syncBuildImpl: syncMock,
 			updatePm2AppImpl: pm2Mock,
@@ -664,9 +657,9 @@ describe("src/cli.ts wiring", () => {
 				phaseOrder.push("pm2")
 				return Promise.resolve({ instanceCount: 1 })
 			},
-			computeClientChurnImpl: () => {
+			computeClientChurnReportImpl: () => {
 				phaseOrder.push("churn")
-				return Promise.resolve("metrics")
+				return Promise.resolve(buildReportFixture())
 			},
 		})
 		const { __test__ } = await importMain()
@@ -874,7 +867,7 @@ describe("src/cli.ts wiring", () => {
 		})
 		const computeMock = vi.fn().mockRejectedValue(churnError)
 		const { logFns } = setupMocks({
-			computeClientChurnImpl: computeMock,
+			computeClientChurnReportImpl: computeMock,
 		})
 		const { __test__ } = await importMain()
 
@@ -902,14 +895,12 @@ describe("src/cli.ts wiring", () => {
 		)
 	})
 
-	it("runChurnPhase uses legacy churn path by default", async () => {
-		const computeLegacyMock = vi.fn().mockResolvedValue("metrics")
+	it("runChurnPhase uses report computation by default", async () => {
 		const computeReportMock = vi
 			.fn()
 			.mockResolvedValue(buildReportFixture())
 		const formatDiagnosticsMock = vi.fn().mockReturnValue("diag-output")
 		const { logFns } = setupMocks({
-			computeClientChurnImpl: computeLegacyMock,
 			computeClientChurnReportImpl: computeReportMock,
 			formatChurnReportDiagnosticsImpl: formatDiagnosticsMock,
 		})
@@ -933,24 +924,43 @@ describe("src/cli.ts wiring", () => {
 			churnDiagnostics: "off",
 		})
 
-		expect(computeLegacyMock).toHaveBeenCalledWith({
+		expect(computeReportMock).toHaveBeenCalledWith({
 			buildDir: "/b",
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			dryRun: false,
+			profileName: "p",
+			runMode: "deploy",
 		})
-		expect(computeReportMock).not.toHaveBeenCalled()
 		expect(formatDiagnosticsMock).not.toHaveBeenCalled()
-		expect(logFns.logChurnSummary).toHaveBeenCalledWith("metrics", {
-			dryRun: false,
-		})
+		expect(logFns.logChurnSummary).toHaveBeenCalledWith(
+			{
+				totalOldFiles: 10,
+				totalNewFiles: 12,
+				stableFiles: 5,
+				changedFiles: 2,
+				addedFiles: 3,
+				removedFiles: 1,
+				totalOldBytes: 1000,
+				totalNewBytes: 1500,
+				stableBytes: 500,
+				changedBytes: 300,
+				addedBytes: 700,
+				removedBytes: 200,
+				downloadImpactFilesPercent: 41.7,
+				cacheReuseFilesPercent: 58.3,
+				downloadImpactBytesPercent: 66.7,
+				cacheReuseBytesPercent: 33.3,
+			},
+			{ dryRun: false },
+		)
 	})
 
 	it("runChurnOnlyMode treats churn errors as fatal", async () => {
 		const churnError = new Error("boom")
 		const computeMock = vi.fn().mockRejectedValue(churnError)
 		const { logFns } = setupMocks({
-			computeClientChurnImpl: computeMock,
+			computeClientChurnReportImpl: computeMock,
 		})
 		const { __test__ } = await importMain()
 		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
@@ -984,13 +994,11 @@ describe("src/cli.ts wiring", () => {
 	})
 
 	it("runChurnPhase uses report path and diagnostics formatter when enabled", async () => {
-		const computeLegacyMock = vi.fn().mockResolvedValue("metrics")
 		const computeReportMock = vi
 			.fn()
 			.mockResolvedValue(buildReportFixture())
 		const formatDiagnosticsMock = vi.fn().mockReturnValue("diag-output")
 		const { logFns } = setupMocks({
-			computeClientChurnImpl: computeLegacyMock,
 			computeClientChurnReportImpl: computeReportMock,
 			formatChurnReportDiagnosticsImpl: formatDiagnosticsMock,
 		})
@@ -1015,7 +1023,6 @@ describe("src/cli.ts wiring", () => {
 			churnTopN: 2,
 		})
 
-		expect(computeLegacyMock).not.toHaveBeenCalled()
 		expect(computeReportMock).toHaveBeenCalledWith({
 			buildDir: "/b",
 			sshConnectionString: "s",
@@ -1053,13 +1060,11 @@ describe("src/cli.ts wiring", () => {
 	})
 
 	it("runChurnPhase uses report path when churnReportOut is set", async () => {
-		const computeLegacyMock = vi.fn().mockResolvedValue("metrics")
 		const computeReportMock = vi
 			.fn()
 			.mockResolvedValue(buildReportFixture())
 		const formatDiagnosticsMock = vi.fn().mockReturnValue("diag-output")
 		const { logFns } = setupMocks({
-			computeClientChurnImpl: computeLegacyMock,
 			computeClientChurnReportImpl: computeReportMock,
 			formatChurnReportDiagnosticsImpl: formatDiagnosticsMock,
 		})
@@ -1084,7 +1089,6 @@ describe("src/cli.ts wiring", () => {
 			churnReportOut: "stdout",
 		})
 
-		expect(computeLegacyMock).not.toHaveBeenCalled()
 		expect(computeReportMock).toHaveBeenCalledWith({
 			buildDir: "/b",
 			sshConnectionString: "s",
@@ -1100,13 +1104,11 @@ describe("src/cli.ts wiring", () => {
 	})
 
 	it("runChurnOnlyMode writes report JSON to stdout when requested", async () => {
-		const computeLegacyMock = vi.fn().mockResolvedValue("metrics")
 		const computeReportMock = vi
 			.fn()
 			.mockResolvedValue(buildReportFixture())
 		const formatDiagnosticsMock = vi.fn().mockReturnValue("diag-output")
 		const { logFns } = setupMocks({
-			computeClientChurnImpl: computeLegacyMock,
 			computeClientChurnReportImpl: computeReportMock,
 			formatChurnReportDiagnosticsImpl: formatDiagnosticsMock,
 		})
@@ -1131,7 +1133,6 @@ describe("src/cli.ts wiring", () => {
 			churnReportOut: "stdout",
 		})
 
-		expect(computeLegacyMock).not.toHaveBeenCalled()
 		expect(computeReportMock).toHaveBeenCalledWith({
 			buildDir: "/b",
 			sshConnectionString: "s",
