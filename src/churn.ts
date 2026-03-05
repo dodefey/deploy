@@ -665,7 +665,7 @@ export function compareManifestMetrics(
 			continue
 		}
 
-		if (oldFile.size === newFile.size) {
+		if (oldFile.sha256 === newFile.sha256) {
 			stableFiles += 1
 			stableBytes += newFile.size
 			continue

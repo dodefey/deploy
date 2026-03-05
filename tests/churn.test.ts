@@ -134,21 +134,48 @@ describe("compareManifestMetrics", () => {
 		expect(metrics).toEqual({
 			totalOldFiles: 3,
 			totalNewFiles: 3,
-			stableFiles: 1,
-			changedFiles: 1,
+			stableFiles: 0,
+			changedFiles: 2,
 			addedFiles: 1,
 			removedFiles: 1,
 			totalOldBytes: 300,
 			totalNewBytes: 600,
-			stableBytes: 100,
-			changedBytes: 200,
+			stableBytes: 0,
+			changedBytes: 300,
 			addedBytes: 300,
 			removedBytes: 50,
-			downloadImpactFilesPercent: ((1 + 1) * 100) / 3,
-			cacheReuseFilesPercent: (1 * 100) / 3,
-			downloadImpactBytesPercent: ((200 + 300) * 100) / 600,
-			cacheReuseBytesPercent: (100 * 100) / 600,
+			downloadImpactFilesPercent: ((2 + 1) * 100) / 3,
+			cacheReuseFilesPercent: (0 * 100) / 3,
+			downloadImpactBytesPercent: ((300 + 300) * 100) / 600,
+			cacheReuseBytesPercent: (0 * 100) / 600,
 		})
+	})
+
+	it("treats same-size same-path hash changes as changed", () => {
+		const oldManifest = buildManifest([
+			{
+				path: "./same-size.js",
+				size: 128,
+				sha256: "old-hash",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+		const newManifest = buildManifest([
+			{
+				path: "./same-size.js",
+				size: 128,
+				sha256: "new-hash",
+				assetType: "js",
+				ownerGroup: "page",
+			},
+		])
+
+		const metrics = compareManifestMetrics(oldManifest, newManifest)
+		expect(metrics.stableFiles).toBe(0)
+		expect(metrics.changedFiles).toBe(1)
+		expect(metrics.stableBytes).toBe(0)
+		expect(metrics.changedBytes).toBe(128)
 	})
 })
 
