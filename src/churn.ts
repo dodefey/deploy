@@ -5,6 +5,8 @@ import * as path from "node:path"
 import {
 	CHURN_MANIFEST_SCHEMA,
 	CHURN_MANIFEST_SCHEMA_VERSION,
+	type TChurnCategoryTotals,
+	type TChurnDiagnosticsCategories,
 	parseChurnManifestV2Json,
 	type TChurnManifestV2,
 	type TChurnManifestV2File,
@@ -515,6 +517,138 @@ export function parseManifest(content: string): Map<string, number> {
 
 export function parseManifestV2(content: string): TChurnManifestV2 {
 	return parseChurnManifestV2Json(content)
+}
+
+export interface TManifestV2FilePair {
+	oldFile: TChurnManifestV2File
+	newFile: TChurnManifestV2File
+}
+
+export interface TManifestV2DiffResult {
+	categories: Required<TChurnDiagnosticsCategories>
+	reusedExact: TManifestV2FilePair[]
+	changedSamePath: TManifestV2FilePair[]
+	renamedSameHash: TManifestV2FilePair[]
+	newContent: TChurnManifestV2File[]
+	removed: TChurnManifestV2File[]
+}
+
+export function compareManifestsV2(
+	oldManifest: TChurnManifestV2,
+	newManifest: TChurnManifestV2,
+): TManifestV2DiffResult {
+	const sortedOld = [...oldManifest.files].sort((left, right) =>
+		left.path.localeCompare(right.path),
+	)
+	const sortedNew = [...newManifest.files].sort((left, right) =>
+		left.path.localeCompare(right.path),
+	)
+
+	const oldByPath = new Map(sortedOld.map((file) => [file.path, file]))
+	const newByPath = new Map(sortedNew.map((file) => [file.path, file]))
+
+	const reusedExact: TManifestV2FilePair[] = []
+	const changedSamePath: TManifestV2FilePair[] = []
+	const addedCandidates: TChurnManifestV2File[] = []
+
+	for (const newFile of sortedNew) {
+		const oldFile = oldByPath.get(newFile.path)
+		if (!oldFile) {
+			addedCandidates.push(newFile)
+			continue
+		}
+
+		if (oldFile.sha256 === newFile.sha256) {
+			reusedExact.push({ oldFile, newFile })
+			continue
+		}
+
+		changedSamePath.push({ oldFile, newFile })
+	}
+
+	const removedCandidates = sortedOld.filter((oldFile) => {
+		return !newByPath.has(oldFile.path)
+	})
+
+	const removedByHash = new Map<string, TChurnManifestV2File[]>()
+	for (const oldFile of removedCandidates) {
+		const bucket = removedByHash.get(oldFile.sha256)
+		if (bucket) {
+			bucket.push(oldFile)
+			continue
+		}
+		removedByHash.set(oldFile.sha256, [oldFile])
+	}
+
+	const renamedSameHash: TManifestV2FilePair[] = []
+	const newContent: TChurnManifestV2File[] = []
+	const renamedOldPaths = new Set<string>()
+
+	for (const newFile of addedCandidates) {
+		const bucket = removedByHash.get(newFile.sha256)
+		if (bucket && bucket.length > 0) {
+			const oldFile = bucket.shift()
+			if (!oldFile) {
+				newContent.push(newFile)
+				continue
+			}
+			renamedSameHash.push({ oldFile, newFile })
+			renamedOldPaths.add(oldFile.path)
+			continue
+		}
+		newContent.push(newFile)
+	}
+
+	const removed = removedCandidates.filter((oldFile) => {
+		return !renamedOldPaths.has(oldFile.path)
+	})
+
+	const categories: Required<TChurnDiagnosticsCategories> = {
+		reused_exact: buildCategoryTotalsFromPairs(reusedExact),
+		changed_same_path: buildCategoryTotalsFromPairs(changedSamePath),
+		renamed_same_hash: buildCategoryTotalsFromPairs(renamedSameHash),
+		new_content: buildCategoryTotalsFromFiles(newContent),
+		removed: buildCategoryTotalsFromRemovedFiles(removed),
+	}
+
+	return {
+		categories,
+		reusedExact,
+		changedSamePath,
+		renamedSameHash,
+		newContent,
+		removed,
+	}
+}
+
+function buildCategoryTotalsFromPairs(
+	pairs: TManifestV2FilePair[],
+): TChurnCategoryTotals {
+	let bytes = 0
+	for (const pair of pairs) {
+		bytes += pair.newFile.size
+	}
+	return { files: pairs.length, bytes }
+}
+
+function buildCategoryTotalsFromFiles(
+	files: TChurnManifestV2File[],
+): TChurnCategoryTotals {
+	let bytes = 0
+	for (const file of files) {
+		bytes += file.size
+	}
+	return { files: files.length, bytes }
+}
+
+function buildCategoryTotalsFromRemovedFiles(
+	files: TChurnManifestV2File[],
+): TChurnCategoryTotals {
+	let bytes = 0
+	for (const file of files) {
+		bytes += file.size
+	}
+	return { files: files.length, bytes }
 }
 
 export function compareManifests(
