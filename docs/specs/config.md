@@ -64,6 +64,17 @@ export interface TProfile {
 			group: string
 		}>
 	}
+
+	logging?: {
+		console?: {
+			verboseDefault?: boolean
+		}
+		file?: {
+			enabled?: boolean
+			dir?: string
+			mode?: "append" | "perRun"
+		}
+	}
 }
 ```
 
@@ -93,6 +104,16 @@ export interface TResolvedConfig {
 			pattern: string
 			group: string
 		}>
+	}
+	logging: {
+		console: {
+			verboseDefault: boolean
+		}
+		file: {
+			enabled: boolean
+			dir: string
+			mode: "append" | "perRun"
+		}
 	}
 }
 ```
@@ -170,6 +191,10 @@ Steps:
     - `churn.diagnosticsDefault = profile.churn?.diagnosticsDefault ?? "off"`
     - `churn.topN = profile.churn?.topN ?? 5`
     - `churn.groupRules = profile.churn?.groupRules ?? []`
+    - `logging.console.verboseDefault = profile.logging?.console?.verboseDefault ?? false`
+    - `logging.file.enabled = profile.logging?.file?.enabled ?? false`
+    - `logging.file.dir = profile.logging?.file?.dir ?? ".deploy/logs"`
+    - `logging.file.mode = profile.logging?.file?.mode ?? "perRun"`
 3. Validate required fields:
     - Required strings: `sshConnectionString`, `remoteDir`, `env`, `pm2AppName` → non-empty after trimming, else `CONFIG_PROFILE_INVALID`.
     - Build command: `buildCommand` must be a non-empty string; missing/whitespace → `CONFIG_PROFILE_INVALID`.
@@ -177,6 +202,10 @@ Steps:
     - Churn diagnostics default, if provided, must be one of: `off`, `compact`, `full`, `json`.
     - `churn.topN`, if provided, must be a positive integer.
     - `churn.groupRules`, if provided, must be an array of `{ pattern, group }` with non-empty strings.
+    - `logging.console.verboseDefault`, if provided, must be a boolean.
+    - `logging.file.enabled`, if provided, must be a boolean.
+    - `logging.file.dir`, if provided, must be a non-empty string.
+    - `logging.file.mode`, if provided, must be `append` or `perRun`.
     - Profile names must be unique; enforce uniqueness once at load time.
     - Optional string fields, if provided, must be non-empty after trimming; otherwise defaults apply.
 4. Return resolved config including `buildCommand` and `buildArgs`.
@@ -195,6 +224,7 @@ return {
 	buildCommand: profile.buildCommand,
 	buildArgs: profile.buildArgs,
 	churn,
+	logging,
 }
 ```
 
@@ -217,6 +247,7 @@ function configError(code: TConfigErrorCode, message: string): Error {
 - Missing/empty required profile fields (sshConnectionString, remoteDir, env, pm2AppName) → `CONFIG_PROFILE_INVALID`
 - Missing/invalid buildCommand or buildArgs → `CONFIG_PROFILE_INVALID`
 - Invalid `churn` shape/values → `CONFIG_PROFILE_INVALID`
+- Invalid `logging` shape/values → `CONFIG_PROFILE_INVALID`
 - Invalid pm2RestartMode → `CONFIG_INVALID_RESTART_MODE`
 
 ## 7. Interaction with src/cli.ts

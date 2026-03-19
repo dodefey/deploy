@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { cli, define } from "gunshi"
-import { promises as fs } from "node:fs"
+import { createWriteStream, promises as fs, type WriteStream } from "node:fs"
 import * as path from "node:path"
 import type { TBuildOutputMode } from "./build.js"
 import { runBuild } from "./build.js"
@@ -9,9 +9,15 @@ import type { TChurnMetrics } from "./churn.js"
 import { computeClientChurnReport } from "./churn.js"
 import { formatChurnReportDiagnostics } from "./churnDiagnosticsFormat.js"
 import type { TChurnReportV1 } from "./churnSchema.js"
-import type { TConfigErrorCode, TResolvedConfig } from "./config.js"
+import type {
+	TConfigErrorCode,
+	TResolvedConfig,
+	TResolvedLoggingConfig,
+} from "./config.js"
 import { listProfiles, resolveProfile } from "./config.js"
 import {
+	createCompositeLoggerSink,
+	createWriterLoggerSink,
 	logChurnOnlyStart,
 	logChurnOnlySuccess,
 	logChurnSummary,
@@ -23,6 +29,7 @@ import {
 	logPhaseSuccess,
 	logPm2Success,
 	logUnexpectedError,
+	setLoggerSink,
 	toErrorMessage,
 } from "./deployLogging.js"
 import { updatePM2App } from "./pm2.js"
@@ -37,6 +44,18 @@ import { runTests } from "./test.js"
 const noop = (): void => {}
 let lastProfileUsed: string | undefined
 const DEFAULT_CHURN_HISTORY_OUT = ".deploy/churn-history.jsonl"
+
+interface TRunLogWriter {
+	writeLine(line: string): void
+	close(): Promise<void>
+	path: string
+}
+
+interface TPhaseOutputHandlers {
+	outputMode: TBuildOutputMode | "callbacks"
+	onStdoutLine?: (line: string) => void
+	onStderrLine?: (line: string) => void
+}
 
 interface TDeployArgs {
 	sshConnectionString: string
@@ -53,6 +72,7 @@ interface TDeployArgs {
 	verbose: boolean
 	churnOnly: boolean
 	profileName: string
+	logging?: TResolvedLoggingConfig
 	churnDiagnostics?: TChurnDiagnosticsMode
 	churnTopN?: number
 	churnReportOut?: string
@@ -61,8 +81,9 @@ interface TDeployArgs {
 }
 
 type TChurnDiagnosticsMode = "off" | "compact" | "full" | "json"
-type TResolvedConfigWithOptionalChurn = Omit<TResolvedConfig, "churn"> & {
+type TResolvedConfigWithOptionalChurn = Omit<TResolvedConfig, "churn" | "logging"> & {
 	churn?: TResolvedConfig["churn"]
+	logging?: TResolvedConfig["logging"]
 }
 
 const deployCommand = define({
@@ -196,6 +217,7 @@ const deployCommand = define({
 		}
 
 		let deploy: TDeployArgs
+		let logWriter: TRunLogWriter | undefined
 		try {
 			const resolved = selectConfig(values.profile, values.verbose)
 			const merged = applyOverrides(resolved, values)
@@ -211,34 +233,48 @@ const deployCommand = define({
 				churnHistoryOut: values.churnHistoryOut,
 			})
 			lastProfileUsed = deploy.profileName
+			if (resolveLoggingConfig(deploy.logging).file.enabled) {
+				logWriter = await createRunLogWriter(deploy)
+			}
 		} catch (err) {
 			handleFatalError("Configuration", err, values.profile)
 		}
 
-		if (deploy.churnOnly) {
-			await runChurnOnlyMode(deploy)
+		try {
+			installRunLoggerSink(logWriter)
+
+			if (deploy.churnOnly) {
+				await runChurnOnlyMode(deploy, logWriter)
+				return
+			}
+
+			logDeployStart({ profileName: deploy.profileName })
+
+			await runTestPhase(deploy, logWriter)
+
+			await runBuildPhase(deploy, logWriter)
+			await runSyncPhase(deploy, logWriter)
+			await runPm2Phase(deploy, logWriter)
+			await runChurnPhase(deploy, logWriter)
+			logDeploySuccess({ profileName: deploy.profileName })
 			return
+		} finally {
+			setLoggerSink(null)
+			await logWriter?.close()
 		}
-
-		logDeployStart({ profileName: deploy.profileName })
-
-		await runTestPhase(deploy)
-
-		await runBuildPhase(deploy)
-		await runSyncPhase(deploy)
-		await runPm2Phase(deploy)
-		await runChurnPhase(deploy)
-		logDeploySuccess({ profileName: deploy.profileName })
-		return
 	},
 })
 
-async function runBuildPhase(values: TDeployArgs): Promise<void> {
+async function runBuildPhase(
+	values: TDeployArgs,
+	logWriter?: TRunLogWriter,
+): Promise<void> {
 	logPhaseStart("Running build")
 	if (values.skipBuild) {
 		logPhaseSuccess("Build skipped (per --skipBuild / -k).")
 		return
 	}
+	const handlers = createPhaseOutputHandlers(values, logWriter)
 	try {
 		await runBuild(
 			{
@@ -247,9 +283,9 @@ async function runBuildPhase(values: TDeployArgs): Promise<void> {
 			},
 			{
 				rootDir: process.cwd(),
-				outputMode: values.verbose ? "inherit" : "callbacks",
-				onStdoutLine: values.verbose ? undefined : noop,
-				onStderrLine: values.verbose ? undefined : noop,
+				outputMode: handlers.outputMode,
+				onStdoutLine: handlers.onStdoutLine,
+				onStderrLine: handlers.onStderrLine,
 			},
 		)
 		logPhaseSuccess("Build completed successfully.")
@@ -258,17 +294,21 @@ async function runBuildPhase(values: TDeployArgs): Promise<void> {
 	}
 }
 
-async function runTestPhase(values: TDeployArgs): Promise<void> {
+async function runTestPhase(
+	values: TDeployArgs,
+	logWriter?: TRunLogWriter,
+): Promise<void> {
 	logPhaseStart("Running test suite")
 	if (values.skipTests) {
 		logPhaseSuccess("Test suite skipped (per --skipTests / -T).")
 		return
 	}
+	const handlers = createPhaseOutputHandlers(values, logWriter)
 	try {
 		await runTests({
-			outputMode: values.verbose ? "inherit" : "callbacks",
-			onStdoutLine: values.verbose ? undefined : noop,
-			onStderrLine: values.verbose ? undefined : noop,
+			outputMode: handlers.outputMode,
+			onStdoutLine: handlers.onStdoutLine,
+			onStderrLine: handlers.onStderrLine,
 		})
 		logPhaseSuccess("Test suite completed successfully.")
 	} catch (err) {
@@ -276,18 +316,20 @@ async function runTestPhase(values: TDeployArgs): Promise<void> {
 	}
 }
 
-async function runSyncPhase(values: TDeployArgs): Promise<void> {
+async function runSyncPhase(
+	values: TDeployArgs,
+	logWriter?: TRunLogWriter,
+): Promise<void> {
 	logPhaseStart("Syncing client bundle to server")
+	const handlers = createPhaseOutputHandlers(values, logWriter)
 	const options = {
 		sshConnectionString: values.sshConnectionString,
 		remoteDir: values.remoteDir,
 		localOutputDir: values.buildDir,
 		dryRun: values.dryRun,
-		outputMode: (values.verbose
-			? "inherit"
-			: "callbacks") as TBuildOutputMode,
-		onStdoutLine: values.verbose ? undefined : noop,
-		onStderrLine: values.verbose ? undefined : noop,
+		outputMode: handlers.outputMode as TBuildOutputMode,
+		onStdoutLine: handlers.onStdoutLine,
+		onStderrLine: handlers.onStderrLine,
 	}
 
 	try {
@@ -298,13 +340,17 @@ async function runSyncPhase(values: TDeployArgs): Promise<void> {
 	}
 }
 
-async function runPm2Phase(values: TDeployArgs): Promise<void> {
+async function runPm2Phase(
+	values: TDeployArgs,
+	logWriter?: TRunLogWriter,
+): Promise<void> {
 	logPhaseStart(`Updating PM2 app "${values.pm2AppName}"`)
 	if (values.dryRun) {
 		logPhaseSuccess("PM2 update complete: skipped.")
 		return
 	}
 
+	const handlers = createPhaseOutputHandlers(values, logWriter)
 	try {
 		const result = await updatePM2App({
 			sshConnectionString: values.sshConnectionString,
@@ -312,9 +358,9 @@ async function runPm2Phase(values: TDeployArgs): Promise<void> {
 			appName: values.pm2AppName,
 			env: values.env,
 			restartMode: values.pm2RestartMode,
-			outputMode: values.verbose ? "inherit" : "callbacks",
-			onStdoutLine: values.verbose ? undefined : noop,
-			onStderrLine: values.verbose ? undefined : noop,
+			outputMode: handlers.outputMode,
+			onStdoutLine: handlers.onStdoutLine,
+			onStderrLine: handlers.onStderrLine,
 		})
 		logPm2Success({
 			appName: values.pm2AppName,
@@ -333,7 +379,10 @@ async function runPm2Phase(values: TDeployArgs): Promise<void> {
 	}
 }
 
-async function runChurnPhase(values: TDeployArgs): Promise<void> {
+async function runChurnPhase(
+	values: TDeployArgs,
+	_logWriter?: TRunLogWriter,
+): Promise<void> {
 	logPhaseStart("Computing client churn metrics")
 	try {
 		await runChurnAnalysis(values, "deploy")
@@ -345,7 +394,10 @@ async function runChurnPhase(values: TDeployArgs): Promise<void> {
 	}
 }
 
-async function runChurnOnlyMode(values: TDeployArgs): Promise<void> {
+async function runChurnOnlyMode(
+	values: TDeployArgs,
+	_logWriter?: TRunLogWriter,
+): Promise<void> {
 	logChurnOnlyStart({ profileName: values.profileName })
 	logPhaseStart("Computing client churn metrics")
 	try {
@@ -472,6 +524,7 @@ function applyOverrides(
 		buildCommand: config.buildCommand,
 		buildArgs: config.buildArgs,
 		churn: config.churn,
+		logging: config.logging,
 	}
 }
 
@@ -494,6 +547,7 @@ function buildDeployArgs(
 		topN: 5,
 		groupRules: [],
 	}
+	const loggingDefaults = resolveLoggingConfig(merged.logging)
 
 	return {
 		sshConnectionString: merged.sshConnectionString,
@@ -507,9 +561,10 @@ function buildDeployArgs(
 		dryRun: values.dryRun,
 		skipTests: values.skipTests,
 		skipBuild: values.skipBuild,
-		verbose: values.verbose,
+		verbose: values.verbose || loggingDefaults.console.verboseDefault,
 		churnOnly: values.churnOnly,
 		profileName: merged.name,
+		logging: loggingDefaults,
 		churnDiagnostics: resolveChurnDiagnosticsMode(
 			values.churnDiagnostics,
 			churnDefaults.diagnosticsDefault,
@@ -659,6 +714,154 @@ async function appendChurnHistory(
 	logPhaseSuccess(`Churn history appended to ${outputPath}`)
 }
 
+function installRunLoggerSink(logWriter?: TRunLogWriter): void {
+	if (!logWriter) {
+		setLoggerSink(null)
+		return
+	}
+
+	setLoggerSink(
+		createCompositeLoggerSink([
+			createWriterLoggerSink(logWriter),
+			{
+				info: (line) => {
+					console.log(line)
+				},
+				error: (line) => {
+					console.error(line)
+				},
+			},
+		]),
+	)
+}
+
+function createPhaseOutputHandlers(
+	values: TDeployArgs,
+	logWriter?: TRunLogWriter,
+): TPhaseOutputHandlers {
+	if (!values.verbose) {
+		return {
+			outputMode: "callbacks",
+			onStdoutLine: noop,
+			onStderrLine: noop,
+		}
+	}
+
+	return {
+		outputMode: "callbacks",
+		onStdoutLine: createTerminalAndFileLineWriter(process.stdout, logWriter),
+		onStderrLine: createTerminalAndFileLineWriter(process.stderr, logWriter),
+	}
+}
+
+function createTerminalAndFileLineWriter(
+	stream: NodeJS.WriteStream,
+	logWriter?: TRunLogWriter,
+): (line: string) => void {
+	return (line: string) => {
+		stream.write(line + "\n")
+		logWriter?.writeLine(line)
+	}
+}
+
+async function createRunLogWriter(deploy: TDeployArgs): Promise<TRunLogWriter> {
+	const outputPath = resolveLogFilePath(deploy)
+	await fs.mkdir(path.dirname(outputPath), { recursive: true })
+	const logging = resolveLoggingConfig(deploy.logging)
+
+	const stream = createWriteStream(outputPath, {
+		flags: logging.file.mode === "append" ? "a" : "w",
+		encoding: "utf8",
+	})
+
+	await new Promise<void>((resolve, reject) => {
+		const cleanup = () => {
+			stream.off("error", onError)
+			stream.off("open", onOpen)
+		}
+		const onError = (err: Error) => {
+			cleanup()
+			reject(err)
+		}
+		const onOpen = () => {
+			cleanup()
+			resolve()
+		}
+		stream.once("error", onError)
+		stream.once("open", onOpen)
+	})
+
+	return createStreamLogWriter(outputPath, stream)
+}
+
+function resolveLogFilePath(deploy: TDeployArgs): string {
+	const logging = resolveLoggingConfig(deploy.logging)
+	const dir = path.resolve(process.cwd(), logging.file.dir)
+	if (logging.file.mode === "append") {
+		return path.join(dir, "deploy.log")
+	}
+
+	return path.join(
+		dir,
+		`deploy-${sanitizeFileSegment(deploy.profileName)}-${formatRunTimestamp(new Date())}.log`,
+	)
+}
+
+function resolveLoggingConfig(
+	logging: TResolvedLoggingConfig | undefined,
+): TResolvedLoggingConfig {
+	return (
+		logging ?? {
+			console: {
+				verboseDefault: false,
+			},
+			file: {
+				enabled: false,
+				dir: ".deploy/logs",
+				mode: "perRun",
+			},
+		}
+	)
+}
+
+function createStreamLogWriter(
+	outputPath: string,
+	stream: WriteStream,
+): TRunLogWriter {
+	return {
+		path: outputPath,
+		writeLine: (line) => {
+			stream.write(line + "\n")
+		},
+		close: async () => {
+			if (stream.closed || stream.destroyed) return
+			await new Promise<void>((resolve, reject) => {
+				stream.end((err?: Error | null) => {
+					if (err) {
+						reject(err)
+						return
+					}
+					resolve()
+				})
+			})
+		},
+	}
+}
+
+function sanitizeFileSegment(value: string): string {
+	return value.replace(/[^a-zA-Z0-9._-]+/g, "-")
+}
+
+function formatRunTimestamp(date: Date): string {
+	const year = String(date.getFullYear())
+	const month = String(date.getMonth() + 1).padStart(2, "0")
+	const day = String(date.getDate()).padStart(2, "0")
+	const hours = String(date.getHours()).padStart(2, "0")
+	const minutes = String(date.getMinutes()).padStart(2, "0")
+	const seconds = String(date.getSeconds()).padStart(2, "0")
+	return `${year}${month}${day}-${hours}${minutes}${seconds}`
+}
+
 function handleFatalError(
 	label: string,
 	err: unknown,
@@ -685,7 +888,7 @@ if (!process.env.VITEST) {
 }
 
 /** @internal Test-only exports */
-export const __test__ = {
+export const __test__: Record<string, unknown> = {
 	selectConfig,
 	applyOverrides,
 	buildDeployArgs,
@@ -698,5 +901,8 @@ export const __test__ = {
 	runTestPhase,
 	deployCommand,
 	handleFatalError,
+	createPhaseOutputHandlers,
+	resolveLogFilePath,
+	formatRunTimestamp,
 	noop,
 }

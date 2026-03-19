@@ -4,6 +4,8 @@ import type { TChurnMetrics } from "../src/churn"
 import * as churnFormatModule from "../src/churnFormat"
 import type { TLoggerSink } from "../src/deployLogging"
 import {
+	createCompositeLoggerSink,
+	createWriterLoggerSink,
 	extractErrorCode,
 	formatFatalError,
 	formatNonFatalError,
@@ -277,6 +279,41 @@ describe("deployLogging sink and wiring", () => {
 				"[deploy] Unexpected deploy error: bad news",
 			])
 			expect(infoLines).toEqual([])
+		})
+	})
+
+	describe("composite and writer sinks", () => {
+		it("createCompositeLoggerSink fans out to all sinks", () => {
+			const infoA: string[] = []
+			const infoB: string[] = []
+			const sink = createCompositeLoggerSink([
+				{
+					info: (line) => infoA.push(line),
+					error: (line) => infoA.push(`ERR:${line}`),
+				},
+				{
+					info: (line) => infoB.push(line),
+					error: (line) => infoB.push(`ERR:${line}`),
+				},
+			])
+
+			sink.info("hello")
+			sink.error("boom")
+
+			expect(infoA).toEqual(["hello", "ERR:boom"])
+			expect(infoB).toEqual(["hello", "ERR:boom"])
+		})
+
+		it("createWriterLoggerSink writes both info and error lines", () => {
+			const lines: string[] = []
+			const sink = createWriterLoggerSink({
+				writeLine: (line) => lines.push(line),
+			})
+
+			sink.info("hello")
+			sink.error("boom")
+
+			expect(lines).toEqual(["hello", "boom"])
 		})
 	})
 })

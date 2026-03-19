@@ -52,12 +52,19 @@ onStderrLine: (line) => {} // no-op
 **Behavior:**
 
 - Same phase lines as non-verbose.
-- Full build / rsync / PM2 output printed.
+- Full test / build / rsync / PM2 output printed.
 - Modules use:
 
 ```ts
-outputMode: "inherit"
+outputMode: "callbacks"
+onStdoutLine: (line) => { /* tee to terminal, optional file */ }
+onStderrLine: (line) => { /* tee to terminal, optional file */ }
 ```
+
+Profile default:
+
+- If `--verbose` is not passed, verbose mode may still be enabled by
+  `logging.console.verboseDefault` in the selected profile.
 
 ---
 
@@ -200,6 +207,7 @@ No outputMode; prints summary.
 - Modules must support `"callbacks"` mode.
 - `main.ts` must pass valid callbacks even if no-op.
 - Console output must come only from orchestrator (`console.log`) in non-verbose mode.
+- When profile file logging is enabled, deploy logs and any surfaced child output are also written to the configured log file.
 
 ---
 

@@ -22,6 +22,38 @@ export function setLoggerSink(sink: TLoggerSink | null | undefined): void {
 	currentSink = sink ?? consoleSink
 }
 
+export interface TLogLineWriter {
+	writeLine(line: string): void
+}
+
+export function createCompositeLoggerSink(
+	sinks: ReadonlyArray<TLoggerSink>,
+): TLoggerSink {
+	return {
+		info: (line) => {
+			for (const sink of sinks) {
+				sink.info(line)
+			}
+		},
+		error: (line) => {
+			for (const sink of sinks) {
+				sink.error(line)
+			}
+		},
+	}
+}
+
+export function createWriterLoggerSink(writer: TLogLineWriter): TLoggerSink {
+	return {
+		info: (line) => {
+			writer.writeLine(line)
+		},
+		error: (line) => {
+			writer.writeLine(line)
+		},
+	}
+}
+
 export interface TLogContext {
 	profileName?: string
 }

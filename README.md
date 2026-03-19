@@ -6,6 +6,7 @@ A small gunshi-based CLI that deploys a **profile-defined build** managed by PM2
 
 - Single command deploy pipeline: tests → build → rsync sync → PM2 restart → churn report.
 - Profile-driven config (`profiles.json`) with per-environment SSH, paths, build command/args, PM2 app name, and restart mode.
+- Optional profile logging defaults for console verbosity and deploy log files.
 - Typed error codes across build, sync, PM2, config, and churn for predictable handling.
 - Flexible output modes (`inherit`, `silent`, `callbacks`) for build/rsync/PM2 stages.
 - Dry-run mode: run build + churn and perform an rsync `--dry-run`; skip PM2 restart and make no remote writes.
@@ -48,6 +49,16 @@ Profiles live in your project root (`./profiles.json`). The CLI looks in the cur
 		"buildArgs": ["nuxt", "build", "--dotenv", ".env.production"], // required
 		"buildDir": ".output", // optional, defaults to .output
 		"pm2RestartMode": "startOrReload", // optional, defaults to startOrReload
+		"logging": {
+			"console": {
+				"verboseDefault": true // optional, defaults to false
+			},
+			"file": {
+				"enabled": true, // optional, defaults to false
+				"dir": ".deploy/logs", // optional, defaults to .deploy/logs
+				"mode": "perRun" // optional: append|perRun (default perRun)
+			}
+		},
 		"churn": {
 			"diagnosticsDefault": "compact", // optional: off|compact|full|json (default off)
 			"topN": 5, // optional positive integer (default 5)
@@ -63,6 +74,7 @@ Validation rules:
 - Unknown profile name → `CONFIG_PROFILE_NOT_FOUND`.
 - Duplicate names → `CONFIG_DUPLICATE_PROFILE`.
 - Empty required fields (including buildCommand/buildArgs) → `CONFIG_PROFILE_INVALID`.
+- Invalid logging fields or modes → `CONFIG_PROFILE_INVALID`.
 - Invalid restart mode → `CONFIG_INVALID_RESTART_MODE`.
 
 ## CLI Usage
@@ -81,7 +93,7 @@ Flags (from `src/cli.ts`):
 - `--skipTests, -T` Skip vitest before deploy.
 - `--skipBuild, -k` Skip build; reuse existing output in `buildDir`.
 - `--dryRun, -n` Run build + churn; rsync in `--dry-run` mode; skip PM2 restart (no remote writes).
-- `--verbose, -V` Inherit stdout/stderr from build/rsync/pm2.
+- `--verbose, -V` Surface raw stdout/stderr from tests/build/rsync/pm2.
 - `--churnOnly, -c` Compute churn without build/sync/pm2.
 - `--churnDiagnostics <off|compact|full|json>` Enable enhanced churn diagnostics output mode.
 - `--churnTopN <n>` Limit top offenders shown in diagnostics output.
@@ -93,6 +105,8 @@ Churn output notes:
 - `--churnReportOut` writes the full canonical report (`TChurnReportV1`).
 - `--churnHistoryOut` appends one JSONL history record per run, including the full canonical report payload under `report` (plus summary fields for quick scans).
 - If omitted, history defaults to `.deploy/churn-history.jsonl`.
+- Profile `logging.console.verboseDefault` may enable verbose output by default when `--verbose` is not passed.
+- Profile `logging.file` writes deploy logs and surfaced child output to `deploy.log` (`append`) or `deploy-<profile>-<timestamp>.log` (`perRun`) under the configured directory.
 
 Example:
 
@@ -109,7 +123,7 @@ node dist/cli.js deploy \
 
 1. **Config**: Load profile, apply CLI overrides, validate restart mode.
 2. **Tests**: `vitest` unless `--skipTests`.
-3. **Build**: Run the profile-defined build command (via `runBuild`); stdout mode per `--verbose`.
+3. **Build**: Run the profile-defined build command (via `runBuild`); raw child output is surfaced per effective verbose mode.
 4. **Sync**: `rsync` local `.output` to `${remoteDir}/.output` (or override), honors `--dryRun`.
 5. **PM2**: `pm2 startOrReload` (or `reboot`) app in `remoteDir`; reports instance count.
 6. **Churn**: compute canonical churn report against `${remoteDir}/.deploy/manifest.json`, log churn summary from report core metrics, optionally render diagnostics, optionally write full report output, optionally append churn history JSONL, and upload updated baseline unless `--dryRun`.
@@ -122,7 +136,7 @@ node dist/cli.js deploy \
 
 ## Output Modes
 
-`outputMode` is one of `inherit` (stream to terminal), `silent`, or `callbacks` (line handlers) and is used by build, sync, and PM2 modules.
+`outputMode` is one of `inherit` (legacy direct stdio), `silent`, or `callbacks` (line handlers) and is used by build, sync, and PM2 modules. The deploy orchestrator now uses callback routing so surfaced output can be teed to the terminal and the optional deploy log file.
 
 ## Error Codes (selected)
 

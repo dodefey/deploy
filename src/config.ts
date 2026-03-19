@@ -20,6 +20,32 @@ export interface TResolvedChurnConfig {
 	groupRules: TChurnGroupRule[]
 }
 
+export interface TProfileLoggingConsoleConfig {
+	verboseDefault?: boolean
+}
+
+export interface TProfileLoggingFileConfig {
+	enabled?: boolean
+	dir?: string
+	mode?: "append" | "perRun"
+}
+
+export interface TProfileLoggingConfig {
+	console?: TProfileLoggingConsoleConfig
+	file?: TProfileLoggingFileConfig
+}
+
+export interface TResolvedLoggingConfig {
+	console: {
+		verboseDefault: boolean
+	}
+	file: {
+		enabled: boolean
+		dir: string
+		mode: "append" | "perRun"
+	}
+}
+
 export interface TProfile {
 	name: string
 	/** SSH target, e.g. "user@host" */
@@ -32,6 +58,7 @@ export interface TProfile {
 	buildCommand?: string
 	buildArgs?: string[]
 	churn?: TProfileChurnConfig
+	logging?: TProfileLoggingConfig
 }
 
 export type TProfileName = TProfile["name"]
@@ -47,6 +74,7 @@ export interface TResolvedConfig {
 	buildCommand: string
 	buildArgs: string[]
 	churn: TResolvedChurnConfig
+	logging: TResolvedLoggingConfig
 }
 
 export type TConfigErrorCode =
@@ -77,6 +105,8 @@ const PROFILE_FILE_ERROR_MESSAGE =
 	"profiles.json is missing, invalid, or empty; expected at least one deploy profile"
 const DEFAULT_CHURN_DIAGNOSTICS_MODE: TChurnDiagnosticsDefault = "off"
 const DEFAULT_CHURN_TOP_N = 5
+const DEFAULT_LOG_FILE_DIR = ".deploy/logs"
+const DEFAULT_LOG_FILE_MODE = "perRun" as const
 
 let profilesLoader = loadProfilesFromDisk
 
@@ -108,6 +138,7 @@ export function resolveProfile(name: TProfileName): TResolvedConfig {
 	)
 	const buildArgs = validateBuildArgs(profile.buildArgs)
 	const churn = validateChurnConfig(profile.churn)
+	const logging = validateLoggingConfig(profile.logging)
 
 	return {
 		name: profile.name,
@@ -120,6 +151,7 @@ export function resolveProfile(name: TProfileName): TResolvedConfig {
 		buildCommand,
 		buildArgs,
 		churn,
+		logging,
 	}
 }
 
@@ -258,6 +290,121 @@ function validateChurnConfig(value: unknown): TResolvedChurnConfig {
 		topN,
 		groupRules,
 	}
+}
+
+function validateLoggingConfig(value: unknown): TResolvedLoggingConfig {
+	if (value === undefined) {
+		return {
+			console: {
+				verboseDefault: false,
+			},
+			file: {
+				enabled: false,
+				dir: DEFAULT_LOG_FILE_DIR,
+				mode: DEFAULT_LOG_FILE_MODE,
+			},
+		}
+	}
+
+	if (!isRecord(value)) {
+		throw configError("CONFIG_PROFILE_INVALID", "logging must be an object")
+	}
+
+	const consoleConfig =
+		value.console === undefined
+			? { verboseDefault: false }
+			: validateLoggingConsoleConfig(value.console)
+	const fileConfig =
+		value.file === undefined
+			? {
+					enabled: false,
+					dir: DEFAULT_LOG_FILE_DIR,
+					mode: DEFAULT_LOG_FILE_MODE,
+				}
+			: validateLoggingFileConfig(value.file)
+
+	return {
+		console: consoleConfig,
+		file: fileConfig,
+	}
+}
+
+function validateLoggingConsoleConfig(
+	value: unknown,
+): TResolvedLoggingConfig["console"] {
+	if (!isRecord(value)) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"logging.console must be an object",
+		)
+	}
+
+	if (
+		value.verboseDefault !== undefined &&
+		typeof value.verboseDefault !== "boolean"
+	) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"logging.console.verboseDefault must be a boolean",
+		)
+	}
+
+	return {
+		verboseDefault: value.verboseDefault ?? false,
+	}
+}
+
+function validateLoggingFileConfig(
+	value: unknown,
+): TResolvedLoggingConfig["file"] {
+	if (!isRecord(value)) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"logging.file must be an object",
+		)
+	}
+
+	if (value.enabled !== undefined && typeof value.enabled !== "boolean") {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"logging.file.enabled must be a boolean",
+		)
+	}
+
+	const dir =
+		value.dir === undefined
+			? DEFAULT_LOG_FILE_DIR
+			: requireString(value.dir, "CONFIG_PROFILE_INVALID", "logging.file.dir")
+
+	const mode =
+		value.mode === undefined
+			? DEFAULT_LOG_FILE_MODE
+			: validateLogFileMode(value.mode)
+
+	return {
+		enabled: value.enabled ?? false,
+		dir,
+		mode,
+	}
+}
+
+function validateLogFileMode(value: unknown): "append" | "perRun" {
+	if (typeof value !== "string") {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"logging.file.mode must be one of: append, perRun",
+		)
+	}
+
+	const trimmed = value.trim()
+	if (trimmed === "append" || trimmed === "perRun") {
+		return trimmed
+	}
+
+	throw configError(
+		"CONFIG_PROFILE_INVALID",
+		`Invalid logging.file.mode: ${value}`,
+	)
 }
 
 function validateDiagnosticsDefault(value: unknown): TChurnDiagnosticsDefault {

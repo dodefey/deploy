@@ -53,6 +53,7 @@ Resolved values are normalized into `TDeployArgs`, including:
 
 - Connection/build/runtime values.
 - Runtime flags.
+- Resolved profile logging config.
 - Churn diagnostics options (`churnDiagnostics`, `churnTopN`, `churnReportOut`, `churnHistoryOut`).
 
 ### 3.3 Churn defaults
@@ -65,6 +66,11 @@ If CLI churn options are not provided:
 - `churnHistoryOut` defaults to `.deploy/churn-history.jsonl` and may be disabled with `off`.
 
 Invalid churn option values are treated as config-invalid errors (`CONFIG_PROFILE_INVALID`).
+
+Verbose resolution:
+
+- `--verbose` enables verbose child output for the current run.
+- Otherwise, the resolved profile may enable verbose child output via `logging.console.verboseDefault`.
 
 ---
 
@@ -95,7 +101,8 @@ If `--churnOnly` is set:
 
 - Logs phase start.
 - Skips when `skipTests` is true.
-- Uses `runTests` with `inherit` output mode when verbose, otherwise callback/no-op wiring.
+- Uses `runTests` with callback wiring in both quiet and verbose modes.
+- Quiet mode uses no-op callbacks; verbose mode tees child output to terminal and optional log file.
 - Failure is fatal.
 
 ### 5.2 Build
@@ -103,19 +110,20 @@ If `--churnOnly` is set:
 - Logs phase start.
 - Skips when `skipBuild` is true.
 - Uses profile-defined `buildCommand`/`buildArgs`.
-- Uses `inherit` output mode when verbose, otherwise callback/no-op wiring.
+- Uses callback wiring in both quiet and verbose modes.
 - Failure is fatal.
 
 ### 5.3 Sync
 
 - Uses `syncBuild` with resolved paths and `dryRun`.
-- Uses `inherit` output mode when verbose, otherwise callback/no-op wiring.
+- Uses callback wiring in both quiet and verbose modes.
 - Failure is fatal.
 
 ### 5.4 PM2
 
 - Skips remote update when `dryRun` is true.
 - Uses `updatePM2App` otherwise.
+- Uses callback wiring in both quiet and verbose modes.
 - `PM2_APP_NAME_NOT_FOUND` is fatal.
 - Other PM2 failures are non-fatal and logged as degraded-success.
 
@@ -145,6 +153,8 @@ If `--churnOnly` is set:
 - PM2 success log (`logPm2Success`)
 - churn summary (`logChurnSummary`)
 - fatal and non-fatal error logs
+
+If profile file logging is enabled, the same deploy logs are also written to the run log file. Verbose child output is likewise teed to that file.
 
 ---
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import path from "node:path"
 
 type MockConfig = {
 	listProfilesReturn?: string[]
@@ -81,6 +82,15 @@ function buildReportFixture() {
 
 function setupMocks(config: MockConfig = {}) {
 	const logFns = {
+		createCompositeLoggerSink: vi.fn((sinks) => ({
+			info: (line: string) => sinks.forEach((sink: any) => sink.info(line)),
+			error: (line: string) =>
+				sinks.forEach((sink: any) => sink.error(line)),
+		})),
+		createWriterLoggerSink: vi.fn((writer) => ({
+			info: (line: string) => writer.writeLine(line),
+			error: (line: string) => writer.writeLine(line),
+		})),
 		logChurnOnlyStart: vi.fn(),
 		logChurnOnlySuccess: vi.fn(),
 		logChurnSummary: vi.fn(),
@@ -92,6 +102,7 @@ function setupMocks(config: MockConfig = {}) {
 		logPhaseSuccess: vi.fn(),
 		logPm2Success: vi.fn(),
 		logUnexpectedError: vi.fn(),
+		setLoggerSink: vi.fn(),
 		toErrorMessage: (err: unknown) =>
 			err instanceof Error ? err.message : String(err),
 	}
@@ -347,6 +358,16 @@ describe("src/cli.ts wiring", () => {
 			churnOnly: false,
 			profileName: "p",
 		})
+		expect(args.logging).toEqual({
+			console: {
+				verboseDefault: false,
+			},
+			file: {
+				enabled: false,
+				dir: ".deploy/logs",
+				mode: "perRun",
+			},
+		})
 	})
 
 	it("buildDeployArgs applies churn defaults and parses churn overrides", async () => {
@@ -385,6 +406,148 @@ describe("src/cli.ts wiring", () => {
 		expect(args.churnReportOut).toBe("./reports/churn.json")
 		expect(args.churnHistoryOut).toBe(".deploy/churn-history.jsonl")
 		expect(args.churnGroupRules).toEqual([])
+	})
+
+	it("buildDeployArgs enables verbose from profile logging.console.verboseDefault", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const cfg = {
+			name: "p",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload" as const,
+			logging: {
+				console: {
+					verboseDefault: true,
+				},
+				file: {
+					enabled: true,
+					dir: "./logs",
+					mode: "append" as const,
+				},
+			},
+		}
+
+		const args = __test__.buildDeployArgs(cfg, {
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+		})
+
+		expect(args.verbose).toBe(true)
+		expect(args.logging).toEqual(cfg.logging)
+	})
+
+	it("createPhaseOutputHandlers suppresses child output when verbose is false", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const handlers = __test__.createPhaseOutputHandlers({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+			profileName: "p",
+		})
+
+		expect(handlers.outputMode).toBe("callbacks")
+		expect(handlers.onStdoutLine).toBeDefined()
+		expect(handlers.onStderrLine).toBeDefined()
+		expect(handlers.onStdoutLine?.("hello")).toBeUndefined()
+		expect(handlers.onStderrLine?.("oops")).toBeUndefined()
+	})
+
+	it("createPhaseOutputHandlers tees child output to console and file when verbose is true", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockReturnValue(true as any)
+		const stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockReturnValue(true as any)
+		const lines: string[] = []
+
+		const handlers = __test__.createPhaseOutputHandlers(
+			{
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload",
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: true,
+				churnOnly: false,
+				profileName: "p",
+			},
+			{
+				path: "/tmp/test.log",
+				writeLine: (line) => lines.push(line),
+				close: () => Promise.resolve(),
+			},
+		)
+
+		handlers.onStdoutLine?.("hello")
+		handlers.onStderrLine?.("oops")
+
+		expect(stdoutSpy).toHaveBeenCalledWith("hello\n")
+		expect(stderrSpy).toHaveBeenCalledWith("oops\n")
+		expect(lines).toEqual(["hello", "oops"])
+	})
+
+	it("resolveLogFilePath uses append and perRun naming conventions", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+
+		const appendPath = __test__.resolveLogFilePath({
+			profileName: "prod",
+			logging: {
+				console: { verboseDefault: false },
+				file: {
+					enabled: true,
+					dir: ".deploy/logs",
+					mode: "append",
+				},
+			},
+		})
+		const perRunPath = __test__.resolveLogFilePath({
+			profileName: "prod site",
+			logging: {
+				console: { verboseDefault: false },
+				file: {
+					enabled: true,
+					dir: ".deploy/logs",
+					mode: "perRun",
+				},
+			},
+		})
+
+		expect(appendPath).toContain(
+			path.join(".deploy", "logs", "deploy.log"),
+		)
+		expect(perRunPath).toMatch(
+			/deploy-prod-site-\d{8}-\d{6}\.log$/,
+		)
 	})
 
 	it("buildDeployArgs normalizes churnHistoryOut override", async () => {
@@ -752,6 +915,56 @@ describe("src/cli.ts wiring", () => {
 		} as any)
 
 		expect(phaseOrder).toEqual(["tests", "build", "sync", "pm2", "churn"])
+	})
+
+	it("deployCommand.run treats log file setup failure as fatal configuration error", async () => {
+		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
+			// @ts-expect-error
+			() => undefined,
+		)
+		const { logFns } = setupMocks({
+			listProfilesReturn: ["p"],
+			resolveProfileImpl: () => ({
+				name: "p",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload" as const,
+				logging: {
+					console: {
+						verboseDefault: false,
+					},
+					file: {
+						enabled: true,
+						dir: "package.json",
+						mode: "append" as const,
+					},
+				},
+			}),
+		})
+		const { __test__ } = await importMain()
+
+		await (__test__.deployCommand as any).run({
+			values: {
+				profile: "p",
+				churnOnly: false,
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: false,
+			},
+		} as any)
+
+		expect(logFns.logFatalError).toHaveBeenCalledWith(
+			"Configuration",
+			expect.any(Error),
+			{ profileName: "p" },
+		)
+		expect(exitSpy).toHaveBeenCalledWith(1)
 	})
 
 	it("runTestPhase skips when skipTests is true", async () => {

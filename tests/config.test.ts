@@ -128,6 +128,113 @@ describe("config module", () => {
 			topN: 5,
 			groupRules: [],
 		})
+		expect(resolved.logging).toEqual({
+			console: {
+				verboseDefault: false,
+			},
+			file: {
+				enabled: false,
+				dir: ".deploy/logs",
+				mode: "perRun",
+			},
+		})
+	})
+
+	it("resolves optional logging config with validated values", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				logging: {
+					console: {
+						verboseDefault: true,
+					},
+					file: {
+						enabled: true,
+						dir: "logs/deploy",
+						mode: "append",
+					},
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+
+		const resolved = resolveProfile("prod")
+		expect(resolved.logging).toEqual({
+			console: {
+				verboseDefault: true,
+			},
+			file: {
+				enabled: true,
+				dir: "logs/deploy",
+				mode: "append",
+			},
+		})
+	})
+
+	it("throws CONFIG_PROFILE_INVALID for malformed logging config", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				logging: "bad" as unknown as TProfile["logging"],
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
+	})
+
+	it("throws CONFIG_PROFILE_INVALID for invalid logging.file.mode", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				logging: {
+					file: {
+						// @ts-expect-error intentional invalid value for validation test
+						mode: "rotate",
+					},
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
+	})
+
+	it("throws CONFIG_PROFILE_INVALID for empty logging.file.dir", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				logging: {
+					file: {
+						dir: "   ",
+					},
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
 	})
 
 	it("resolves optional churn config with validated values", () => {
