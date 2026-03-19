@@ -5,4 +5,5 @@ coverage
 .env
 .DS_Store
 .deploy
+.vscode
 profiles.json
