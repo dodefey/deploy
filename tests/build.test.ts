@@ -213,6 +213,27 @@ describe("output mode wiring", () => {
 		await promise
 		expect(lines).toEqual(["oops", "bad"])
 	})
+
+	it("forwards raw chunks when chunk callbacks are provided", async () => {
+		const { spawnImpl, emitStdout, emitStderr, emitClose } = makeSpawnMocks()
+		const stdoutChunks: string[] = []
+		const stderrChunks: string[] = []
+		const promise = runBuild(
+			commandSpec,
+			withSpawn({
+				spawnImpl,
+				outputMode: "callbacks",
+				onStdoutChunk: (chunk) => stdoutChunks.push(chunk),
+				onStderrChunk: (chunk) => stderrChunks.push(chunk),
+			}),
+		)
+		emitStdout("foo\nbar")
+		emitStderr("warn\r\nnext")
+		emitClose(0, null)
+		await promise
+		expect(stdoutChunks).toEqual(["foo\nbar"])
+		expect(stderrChunks).toEqual(["warn\r\nnext"])
+	})
 })
 
 describe("missing callback behavior", () => {

@@ -106,8 +106,8 @@ Churn output notes:
 - `--churnHistoryOut` appends one JSONL history record per run, including the full canonical report payload under `report` (plus summary fields for quick scans).
 - If omitted, history defaults to `.deploy/churn-history.jsonl`.
 - Profile `logging.console.verboseDefault` may enable verbose output by default when `--verbose` is not passed.
-- Profile `logging.file` writes deploy logs and surfaced child output to `deploy.log` (`append`) or `deploy-<profile>-<timestamp>.log` (`perRun`) under the configured directory.
-- Failed test output is always written to the deploy log before the CLI exits; in quiet mode it is replayed to the terminal only on failure.
+- Profile `logging.file` writes deploy logs and all child output from tests/build/rsync/pm2 to `deploy.log` (`append`) or `deploy-<profile>-<timestamp>.log` (`perRun`) under the configured directory.
+- Quiet mode keeps the terminal phase-oriented; raw child output is written to the deploy log only.
 
 Example:
 
@@ -123,7 +123,7 @@ node dist/cli.js deploy \
 ## Deploy Pipeline (what happens)
 
 1. **Config**: Load profile, apply CLI overrides, validate restart mode.
-2. **Tests**: `vitest` unless `--skipTests`.
+2. **Tests**: `npx vitest run --reporter=verbose` unless `--skipTests`, so deploy logs enumerate test cases and outcomes.
 3. **Build**: Run the profile-defined build command (via `runBuild`); raw child output is surfaced per effective verbose mode.
 4. **Sync**: `rsync` local `.output` to `${remoteDir}/.output` (or override), honors `--dryRun`.
 5. **PM2**: `pm2 startOrReload` (or `reboot`) app in `remoteDir`; reports instance count.
@@ -137,7 +137,7 @@ node dist/cli.js deploy \
 
 ## Output Modes
 
-`outputMode` is one of `inherit` (legacy direct stdio), `silent`, or `callbacks` and is used by build, sync, and PM2 modules. For tests, the deploy orchestrator uses raw chunk forwarding in callback mode so Vitest failure details can be teed to the terminal and deploy log with minimal formatting loss.
+`outputMode` is one of `inherit` (legacy direct stdio), `silent`, or `callbacks` and is used by build, sync, and PM2 modules. In deploy orchestration, callback mode is used to forward raw child output to the terminal only in verbose mode and to the deploy log whenever file logging is enabled. For tests, deploy mode uses Vitest's verbose reporter so the log records individual test names and outcomes.
 
 ## Error Codes (selected)
 

@@ -15,6 +15,8 @@ export interface TBuildOptions {
 	outputMode?: TBuildOutputMode
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 export type TBuildErrorCode =
@@ -42,6 +44,8 @@ export async function runBuild(
 		outputMode = "inherit",
 		onStdoutLine,
 		onStderrLine,
+		onStdoutChunk,
+		onStderrChunk,
 	} = optionsWithSpawn
 
 	const cwd = path.resolve(rootDir)
@@ -57,7 +61,12 @@ export async function runBuild(
 		},
 	)
 
-	wireOutput(child, outputMode, { onStdoutLine, onStderrLine })
+	wireOutput(child, outputMode, {
+		onStdoutLine,
+		onStderrLine,
+		onStdoutChunk,
+		onStderrChunk,
+	})
 
 	await new Promise<void>((resolve, reject) => {
 		child.on("error", (err: NodeJS.ErrnoException) => {
@@ -118,9 +127,21 @@ function wireOutput(
 	listeners: {
 		onStdoutLine?: (line: string) => void
 		onStderrLine?: (line: string) => void
+		onStdoutChunk?: (chunk: string) => void
+		onStderrChunk?: (chunk: string) => void
 	},
 ) {
 	if (outputMode !== "callbacks") return
+
+	if (listeners.onStdoutChunk || listeners.onStderrChunk) {
+		child.stdout?.on("data", (chunk) => {
+			listeners.onStdoutChunk?.(String(chunk))
+		})
+		child.stderr?.on("data", (chunk) => {
+			listeners.onStderrChunk?.(String(chunk))
+		})
+		return
+	}
 
 	let stdoutBuffer = ""
 	let stderrBuffer = ""

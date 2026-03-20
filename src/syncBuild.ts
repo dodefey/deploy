@@ -12,6 +12,8 @@ export interface TSyncBuildOptions {
 	outputMode?: TBuildOutputMode
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 export type TSyncBuildErrorCode =
@@ -23,6 +25,8 @@ type TRunOptions = {
 	outputMode: TBuildOutputMode
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 type TRunResult = {
@@ -41,9 +45,17 @@ export async function syncBuild(options: TSyncBuildOptions): Promise<void> {
 		outputMode = "inherit",
 		onStdoutLine,
 		onStderrLine,
+		onStdoutChunk,
+		onStderrChunk,
 	} = options
 
-	const runOptions: TRunOptions = { outputMode, onStdoutLine, onStderrLine }
+	const runOptions: TRunOptions = {
+		outputMode,
+		onStdoutLine,
+		onStderrLine,
+		onStdoutChunk,
+		onStderrChunk,
+	}
 	const localDir = resolveLocalDir(localOutputDir)
 
 	await ensureLocalOutputDir(localDir)
@@ -231,6 +243,11 @@ function wireCallbacks(
 
 	child.stdout?.on("data", (chunk) => {
 		const text = String(chunk)
+		if (runOptions.onStdoutChunk) {
+			runOptions.onStdoutChunk(text)
+			onStdout(text)
+			return
+		}
 		if (!runOptions.onStdoutLine) {
 			onStdout(text)
 			return
@@ -245,6 +262,11 @@ function wireCallbacks(
 
 	child.stderr?.on("data", (chunk) => {
 		const text = String(chunk)
+		if (runOptions.onStderrChunk) {
+			runOptions.onStderrChunk(text)
+			onStderr(text)
+			return
+		}
 		if (!runOptions.onStderrLine) {
 			onStderr(text)
 			return
@@ -258,10 +280,10 @@ function wireCallbacks(
 	})
 
 	child.on("close", () => {
-		if (stdoutBuffer) {
+		if (!runOptions.onStdoutChunk && stdoutBuffer) {
 			flushLines(stdoutBuffer + "\n", runOptions.onStdoutLine, onStdout)
 		}
-		if (stderrBuffer) {
+		if (!runOptions.onStderrChunk && stderrBuffer) {
 			flushLines(stderrBuffer + "\n", runOptions.onStderrLine, onStderr)
 		}
 	})

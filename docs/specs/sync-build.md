@@ -40,6 +40,8 @@ export interface TSyncBuildOptions {
 	outputMode?: TBuildOutputMode // "inherit" | "silent" | "callbacks"
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 ```
 
@@ -65,7 +67,7 @@ export interface TSyncBuildOptions {
     - Behaves exactly like the output model used by `build.ts` and `pm2.ts`.
     - `"inherit"`: module writes rsync output to process stdout/stderr.
     - `"silent"`: nothing printed.
-    - `"callbacks"`: output is delivered line-by-line to provided callbacks.
+    - `"callbacks"`: output is delivered to provided callbacks as raw chunks when chunk callbacks are supplied, otherwise line-by-line.
 
 ## 4. Behavior
 

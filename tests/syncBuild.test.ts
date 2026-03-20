@@ -236,4 +236,23 @@ describe("syncBuild", () => {
 		expect(out).toEqual([])
 		expect(err).toEqual(["warn1", "warn2"])
 	})
+
+	it("delivers raw chunks when chunk callbacks are provided", async () => {
+		const responses: TSpawnResponse[] = [
+			{ code: 0 }, // mkdir
+			{ code: 0, stdout: "line1\nline2", stderr: "warn1\r\nwarn2" }, // rsync
+		]
+		const { syncBuild } = await importModuleWithMocks(responses)
+		const out: string[] = []
+		const err: string[] = []
+		await syncBuild({
+			sshConnectionString: "h",
+			remoteDir: "/app",
+			outputMode: "callbacks",
+			onStdoutChunk: (chunk) => out.push(chunk),
+			onStderrChunk: (chunk) => err.push(chunk),
+		})
+		expect(out).toEqual(["line1\nline2"])
+		expect(err).toEqual(["warn1\r\nwarn2"])
+	})
 })

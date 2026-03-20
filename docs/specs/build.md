@@ -36,12 +36,14 @@ export interface TBuildOptions {
 	// How to handle build output
 	// "inherit"  -> child stdout/stderr inherit
 	// "silent"   -> ignore stdout/stderr
-	// "callbacks"-> pipe and forward line-by-line
+	// "callbacks"-> pipe and forward raw chunks or lines via callbacks
 	outputMode?: TBuildOutputMode // default: "inherit"
 
 	// Optional callbacks when outputMode === "callbacks"
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 export type TBuildErrorCode =

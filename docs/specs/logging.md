@@ -37,12 +37,13 @@ This spec **does not** change deploy semantics, exit codes, or module behavior.
     - Churn summary
     - Churn-only start/complete lines when running churn-only
 - No direct process output.
+- If profile file logging is enabled, the deploy log still captures full child output from tests, build, sync, and PM2.
 - Modules use:
 
 ```ts
 outputMode: "callbacks"
-onStdoutLine: (line) => {} // no-op
-onStderrLine: (line) => {} // no-op
+onStdoutChunk: (chunk) => { /* write to log file only, or noop if disabled */ }
+onStderrChunk: (chunk) => { /* write to log file only, or noop if disabled */ }
 ```
 
 ---
@@ -57,8 +58,8 @@ onStderrLine: (line) => {} // no-op
 
 ```ts
 outputMode: "callbacks"
-onStdoutLine: (line) => { /* tee to terminal, optional file */ }
-onStderrLine: (line) => { /* tee to terminal, optional file */ }
+onStdoutChunk: (chunk) => { /* tee to terminal, optional file */ }
+onStderrChunk: (chunk) => { /* tee to terminal, optional file */ }
 ```
 
 Profile default:
@@ -168,11 +169,11 @@ If no profile name is available (rare), the logger may omit `(profile="...")` an
 ```ts
 outputMode = "callbacks"
 if (verbose) {
-	onStdoutLine = teeToTerminalAndLog
-	onStderrLine = teeToTerminalAndLog
+	onStdoutChunk = teeRawChunkToTerminalAndLog
+	onStderrChunk = teeRawChunkToTerminalAndLog
 } else {
-	onStdoutLine = noop
-	onStderrLine = noop
+	onStdoutChunk = writeRawChunkToLogOrNoop
+	onStderrChunk = writeRawChunkToLogOrNoop
 }
 ```
 
@@ -181,11 +182,11 @@ if (verbose) {
 ```ts
 outputMode = "callbacks"
 if (verbose) {
-	onStdoutLine = teeToTerminalAndLog
-	onStderrLine = teeToTerminalAndLog
+	onStdoutChunk = teeRawChunkToTerminalAndLog
+	onStderrChunk = teeRawChunkToTerminalAndLog
 } else {
-	onStdoutLine = noop
-	onStderrLine = noop
+	onStdoutChunk = writeRawChunkToLogOrNoop
+	onStderrChunk = writeRawChunkToLogOrNoop
 }
 ```
 
@@ -194,11 +195,11 @@ if (verbose) {
 ```ts
 outputMode = "callbacks"
 if (verbose) {
-	onStdoutLine = teeToTerminalAndLog
-	onStderrLine = teeToTerminalAndLog
+	onStdoutChunk = teeRawChunkToTerminalAndLog
+	onStderrChunk = teeRawChunkToTerminalAndLog
 } else {
-	onStdoutLine = noop
-	onStderrLine = noop
+	onStdoutChunk = writeRawChunkToLogOrNoop
+	onStderrChunk = writeRawChunkToLogOrNoop
 }
 ```
 
@@ -210,11 +211,21 @@ if (verbose) {
 	onStdoutChunk = teeRawChunkToTerminalAndLog
 	onStderrChunk = teeRawChunkToTerminalAndLog
 } else {
-	onStdoutChunk = bufferAndWriteToLog
-	onStderrChunk = bufferAndWriteToLog
-	// replay to terminal only if tests fail
+	onStdoutChunk = writeRawChunkToLogOrNoop
+	onStderrChunk = writeRawChunkToLogOrNoop
 }
 ```
+
+Requirements:
+
+- In verbose mode, terminal output for tests must be byte-for-byte equivalent to running the underlying test command directly in the same terminal.
+- Deploy-mode tests must be invoked with a reporter that emits individual test names and outcomes.
+- If profile file logging is enabled, the test portion of the run log must show:
+    - which tests were run
+    - which tests passed
+    - which tests failed, if any
+    - failed test names and assertion details
+- These test details must be present in the log even when the deploy exits fatally after the test phase.
 
 ### Churn
 
@@ -225,9 +236,11 @@ No outputMode; prints summary.
 ## 7. Future-Proofing
 
 - Modules must support `"callbacks"` mode.
+- Build/sync/PM2/tests must support raw chunk forwarding in callback mode; line callbacks remain available as a compatibility fallback.
 - `main.ts` must pass valid callbacks even if no-op.
-- Console output must come only from orchestrator-managed forwarding in non-verbose mode, except for replaying buffered failed test output.
-- When profile file logging is enabled, deploy logs and any surfaced child output are also written to the configured log file.
+- Console output must come only from orchestrator-managed forwarding in non-verbose mode.
+- When profile file logging is enabled, deploy logs and all child output from tests, build, sync, and PM2 are also written to the configured log file.
+- For verbose terminal output, fidelity to direct command execution is required, not approximate formatting.
 
 ---
 

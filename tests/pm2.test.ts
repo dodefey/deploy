@@ -351,6 +351,43 @@ describe("updatePm2App", () => {
 		expect(err).toEqual([])
 	})
 
+	it("passes through raw chunk callbacks in callbacks mode", async () => {
+		const responses: TSpawnResponse[] = [
+			{ code: 0 }, // test -f
+			{ code: 0, stdout: "remote" }, // cat
+			{ code: 0 }, // upload
+			{
+				code: 0,
+				stdout: JSON.stringify([
+					{ name: "app", pm2_env: { status: "stopped" } },
+				]),
+			}, // ensurePm2AppExists jlist
+			{ code: 0, stdout: "pm2 ok\nline2" }, // startOrReload
+			{
+				code: 0,
+				stdout: JSON.stringify([
+					{ name: "app", pm2_env: { status: "online" } },
+				]),
+			}, // jlist
+		]
+		const out: string[] = []
+		const err: string[] = []
+
+		const { updatePM2App } = await importModuleWithMocks(responses, "local")
+		const result = await updatePM2App({
+			sshConnectionString: "host",
+			remoteDir: "/remote",
+			appName: "app",
+			outputMode: "callbacks",
+			onStdoutChunk: (chunk) => out.push(chunk),
+			onStderrChunk: (chunk) => err.push(chunk),
+		})
+
+		expect(result.instanceCount).toBe(1)
+		expect(out.some((chunk) => chunk.includes("pm2 ok\nline2"))).toBe(true)
+		expect(err).toEqual([])
+	})
+
 	it("flushes buffered stdout in callbacks mode before resolving", async () => {
 		const jlist = JSON.stringify([
 			{ name: "app", pm2_env: { status: "online" } },

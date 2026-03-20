@@ -44,7 +44,7 @@ export interface TTestOptions {
 	// How to handle test output
 	// "inherit"   -> test output goes directly to parent stdio
 	// "silent"    -> test stdout/stderr are ignored
-	// "callbacks" -> test stdout/stderr are piped and forwarded line-by-line
+	// "callbacks" -> test stdout/stderr are piped and forwarded via raw chunks or lines
 	outputMode?: TTestOutputMode // default: "inherit"
 
 	// Optional callbacks when outputMode === "callbacks"
@@ -171,6 +171,12 @@ Behavior in this mode:
     - Or ignore them entirely.
 
 No changes to success semantics: success is still “did not throw.”
+
+For deploy-orchestrated usage, the caller may impose stronger guarantees on top of callback mode:
+
+- In verbose mode, the terminal output shown to the user must match exactly what they would see if the test command were run directly in that terminal.
+- The deploy orchestrator may choose a more explicit test reporter than the generic module default so persisted logs enumerate test names and outcomes.
+- When file logging is enabled, the persisted log must show which tests ran and their outcomes, including which tests passed and which tests failed if any, with failed test names and assertion details.
 
 ---
 

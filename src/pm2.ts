@@ -26,6 +26,8 @@ export interface TPM2Options {
 	outputMode?: TBuildOutputMode
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 export interface TPM2Result {
@@ -53,6 +55,8 @@ type TRunSshOptions = {
 	outputMode: TBuildOutputMode
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 export async function updatePM2App(options: TPM2Options): Promise<TPM2Result> {
@@ -66,12 +70,16 @@ export async function updatePM2App(options: TPM2Options): Promise<TPM2Result> {
 		outputMode = "inherit",
 		onStdoutLine,
 		onStderrLine,
+		onStdoutChunk,
+		onStderrChunk,
 	} = options
 
 	const sshRunOptions: TRunSshOptions = {
 		outputMode,
 		onStdoutLine,
 		onStderrLine,
+		onStdoutChunk,
+		onStderrChunk,
 	}
 
 	const localConfigContent = await readLocalConfig(localEcosystemPath)
@@ -547,6 +555,11 @@ function wireCallbacks(
 
 	child.stdout?.on("data", (chunk) => {
 		const text = String(chunk)
+		if (sshOptions.onStdoutChunk) {
+			sshOptions.onStdoutChunk(text)
+			onStdout(text)
+			return
+		}
 		if (!sshOptions.onStdoutLine) {
 			onStdout(text)
 			return
@@ -561,6 +574,11 @@ function wireCallbacks(
 
 	child.stderr?.on("data", (chunk) => {
 		const text = String(chunk)
+		if (sshOptions.onStderrChunk) {
+			sshOptions.onStderrChunk(text)
+			onStderr(text)
+			return
+		}
 		if (!sshOptions.onStderrLine) {
 			onStderr(text)
 			return
@@ -574,11 +592,11 @@ function wireCallbacks(
 	})
 
 	const flushRemaining = (): void => {
-		if (stdoutBuffer) {
+		if (!sshOptions.onStdoutChunk && stdoutBuffer) {
 			flushLines(stdoutBuffer + "\n", sshOptions.onStdoutLine, onStdout)
 			stdoutBuffer = ""
 		}
-		if (stderrBuffer) {
+		if (!sshOptions.onStderrChunk && stderrBuffer) {
 			flushLines(stderrBuffer + "\n", sshOptions.onStderrLine, onStderr)
 			stderrBuffer = ""
 		}

@@ -54,17 +54,12 @@ interface TRunLogWriter {
 }
 
 interface TPhaseOutputHandlers {
-	outputMode: TBuildOutputMode | "callbacks"
-	onStdoutLine?: (line: string) => void
-	onStderrLine?: (line: string) => void
-}
-
-interface TTestPhaseOutputHandlers {
 	outputMode: "callbacks"
 	onStdoutChunk: (chunk: string) => void
 	onStderrChunk: (chunk: string) => void
-	flushBufferedTerminalOutput(): void
 }
+
+type TTestPhaseOutputHandlers = TPhaseOutputHandlers
 
 interface TDeployArgs {
 	sshConnectionString: string
@@ -293,8 +288,8 @@ async function runBuildPhase(
 			{
 				rootDir: process.cwd(),
 				outputMode: handlers.outputMode,
-				onStdoutLine: handlers.onStdoutLine,
-				onStderrLine: handlers.onStderrLine,
+				onStdoutChunk: handlers.onStdoutChunk,
+				onStderrChunk: handlers.onStderrChunk,
 			},
 		)
 		logPhaseSuccess("Build completed successfully.")
@@ -315,13 +310,14 @@ async function runTestPhase(
 	const handlers = createTestPhaseOutputHandlers(values, logWriter)
 	try {
 		await runTests({
+			testBin: "npx",
+			testArgs: ["vitest", "run", "--reporter=verbose"],
 			outputMode: handlers.outputMode,
 			onStdoutChunk: handlers.onStdoutChunk,
 			onStderrChunk: handlers.onStderrChunk,
 		})
 		logPhaseSuccess("Test suite completed successfully.")
 	} catch (err) {
-		handlers.flushBufferedTerminalOutput()
 		handleFatalError("Tests", err, values.profileName)
 	}
 }
@@ -338,8 +334,8 @@ async function runSyncPhase(
 		localOutputDir: values.buildDir,
 		dryRun: values.dryRun,
 		outputMode: handlers.outputMode as TBuildOutputMode,
-		onStdoutLine: handlers.onStdoutLine,
-		onStderrLine: handlers.onStderrLine,
+		onStdoutChunk: handlers.onStdoutChunk,
+		onStderrChunk: handlers.onStderrChunk,
 	}
 
 	try {
@@ -369,8 +365,8 @@ async function runPm2Phase(
 			env: values.env,
 			restartMode: values.pm2RestartMode,
 			outputMode: handlers.outputMode,
-			onStdoutLine: handlers.onStdoutLine,
-			onStderrLine: handlers.onStderrLine,
+			onStdoutChunk: handlers.onStdoutChunk,
+			onStderrChunk: handlers.onStderrChunk,
 		})
 		logPm2Success({
 			appName: values.pm2AppName,
@@ -749,28 +745,32 @@ function createPhaseOutputHandlers(
 	values: TDeployArgs,
 	logWriter?: TRunLogWriter,
 ): TPhaseOutputHandlers {
-	if (!values.verbose) {
+	if (values.verbose) {
 		return {
 			outputMode: "callbacks",
-			onStdoutLine: noop,
-			onStderrLine: noop,
+			onStdoutChunk: createTerminalAndFileChunkWriter(
+				process.stdout,
+				logWriter,
+			),
+			onStderrChunk: createTerminalAndFileChunkWriter(
+				process.stderr,
+				logWriter,
+			),
+		}
+	}
+
+	if (logWriter) {
+		return {
+			outputMode: "callbacks",
+			onStdoutChunk: createFileChunkWriter(logWriter),
+			onStderrChunk: createFileChunkWriter(logWriter),
 		}
 	}
 
 	return {
 		outputMode: "callbacks",
-		onStdoutLine: createTerminalAndFileLineWriter(process.stdout, logWriter),
-		onStderrLine: createTerminalAndFileLineWriter(process.stderr, logWriter),
-	}
-}
-
-function createTerminalAndFileLineWriter(
-	stream: NodeJS.WriteStream,
-	logWriter?: TRunLogWriter,
-): (line: string) => void {
-	return (line: string) => {
-		stream.write(line + "\n")
-		logWriter?.writeLine(line)
+		onStdoutChunk: noop,
+		onStderrChunk: noop,
 	}
 }
 
@@ -784,49 +784,19 @@ function createTerminalAndFileChunkWriter(
 	}
 }
 
+function createFileChunkWriter(
+	logWriter: TRunLogWriter,
+): (chunk: string) => void {
+	return (chunk: string) => {
+		logWriter.writeChunk(chunk)
+	}
+}
+
 function createTestPhaseOutputHandlers(
 	values: TDeployArgs,
 	logWriter?: TRunLogWriter,
 ): TTestPhaseOutputHandlers {
-	if (values.verbose) {
-		return {
-			outputMode: "callbacks",
-			onStdoutChunk: createTerminalAndFileChunkWriter(
-				process.stdout,
-				logWriter,
-			),
-			onStderrChunk: createTerminalAndFileChunkWriter(
-				process.stderr,
-				logWriter,
-			),
-			flushBufferedTerminalOutput: noop,
-		}
-	}
-
-	const stdoutChunks: string[] = []
-	const stderrChunks: string[] = []
-
-	return {
-		outputMode: "callbacks",
-		onStdoutChunk: (chunk) => {
-			stdoutChunks.push(chunk)
-			logWriter?.writeChunk(chunk)
-		},
-		onStderrChunk: (chunk) => {
-			stderrChunks.push(chunk)
-			logWriter?.writeChunk(chunk)
-		},
-		flushBufferedTerminalOutput: () => {
-			for (const chunk of stdoutChunks) {
-				process.stdout.write(chunk)
-			}
-			for (const chunk of stderrChunks) {
-				process.stderr.write(chunk)
-			}
-			stdoutChunks.length = 0
-			stderrChunks.length = 0
-		},
-	}
+	return createPhaseOutputHandlers(values, logWriter)
 }
 
 async function createRunLogWriter(deploy: TDeployArgs): Promise<TRunLogWriter> {

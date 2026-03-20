@@ -448,6 +448,12 @@ describe("src/cli.ts wiring", () => {
 	it("createPhaseOutputHandlers suppresses child output when verbose is false", async () => {
 		setupMocks()
 		const { __test__ } = await importMain()
+		const stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockReturnValue(true as any)
+		const stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockReturnValue(true as any)
 		const handlers = __test__.createPhaseOutputHandlers({
 			sshConnectionString: "s",
 			remoteDir: "/r",
@@ -466,10 +472,56 @@ describe("src/cli.ts wiring", () => {
 		})
 
 		expect(handlers.outputMode).toBe("callbacks")
-		expect(handlers.onStdoutLine).toBeDefined()
-		expect(handlers.onStderrLine).toBeDefined()
-		expect(handlers.onStdoutLine?.("hello")).toBeUndefined()
-		expect(handlers.onStderrLine?.("oops")).toBeUndefined()
+		expect(handlers.onStdoutChunk).toBeDefined()
+		expect(handlers.onStderrChunk).toBeDefined()
+		expect(handlers.onStdoutChunk("hello")).toBeUndefined()
+		expect(handlers.onStderrChunk("oops")).toBeUndefined()
+		expect(stdoutSpy).not.toHaveBeenCalled()
+		expect(stderrSpy).not.toHaveBeenCalled()
+	})
+
+	it("createPhaseOutputHandlers writes child output only to file when quiet and file logging is enabled", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockReturnValue(true as any)
+		const stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockReturnValue(true as any)
+		const chunks: string[] = []
+
+		const handlers = __test__.createPhaseOutputHandlers(
+			{
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload",
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: false,
+				churnOnly: false,
+				profileName: "p",
+			},
+			{
+				path: "/tmp/test.log",
+				writeLine: (line) => chunks.push(line),
+				writeChunk: (chunk) => chunks.push(chunk),
+				close: () => Promise.resolve(),
+			},
+		)
+
+		handlers.onStdoutChunk("hello\n")
+		handlers.onStderrChunk("oops\n")
+
+		expect(stdoutSpy).not.toHaveBeenCalled()
+		expect(stderrSpy).not.toHaveBeenCalled()
+		expect(chunks).toEqual(["hello\n", "oops\n"])
 	})
 
 	it("createPhaseOutputHandlers tees child output to console and file when verbose is true", async () => {
@@ -508,12 +560,12 @@ describe("src/cli.ts wiring", () => {
 			},
 		)
 
-		handlers.onStdoutLine?.("hello")
-		handlers.onStderrLine?.("oops")
+		handlers.onStdoutChunk("hello\n")
+		handlers.onStderrChunk("oops\n")
 
 		expect(stdoutSpy).toHaveBeenCalledWith("hello\n")
 		expect(stderrSpy).toHaveBeenCalledWith("oops\n")
-		expect(lines).toEqual(["hello", "oops"])
+		expect(lines).toEqual(["hello\n", "oops\n"])
 	})
 
 	it("resolveLogFilePath uses append and perRun naming conventions", async () => {
@@ -1000,7 +1052,7 @@ describe("src/cli.ts wiring", () => {
 
 	it("runTestPhase treats test failures as fatal", async () => {
 		const testError = new Error("tests failed")
-		const { logFns } = setupMocks({
+		const { logFns, runTests } = setupMocks({
 			runTestsImpl: () => Promise.reject(testError),
 		})
 		const { __test__ } = await importMain()
@@ -1027,9 +1079,15 @@ describe("src/cli.ts wiring", () => {
 		expect(logFns.logFatalError).toHaveBeenCalledWith("Tests", testError, {
 			profileName: "p",
 		})
+		expect(runTests).toHaveBeenCalledWith(
+			expect.objectContaining({
+				testBin: "npx",
+				testArgs: ["vitest", "run", "--reporter=verbose"],
+			}),
+		)
 	})
 
-	it("runTestPhase replays buffered failed test output to terminal when not verbose", async () => {
+	it("runTestPhase writes failed test output to the file log without replaying it to the quiet terminal", async () => {
 		const { runTests } = setupMocks({
 			runTestsImpl: ({ onStdoutChunk, onStderrChunk }: any) => {
 				onStdoutChunk?.("stdout chunk\n")
@@ -1075,12 +1133,14 @@ describe("src/cli.ts wiring", () => {
 
 		expect(runTests).toHaveBeenCalledWith(
 			expect.objectContaining({
+				testBin: "npx",
+				testArgs: ["vitest", "run", "--reporter=verbose"],
 				onStdoutChunk: expect.any(Function),
 				onStderrChunk: expect.any(Function),
 			}),
 		)
-		expect(stdoutSpy).toHaveBeenCalledWith("stdout chunk\n")
-		expect(stderrSpy).toHaveBeenCalledWith("stderr chunk\n")
+		expect(stdoutSpy).not.toHaveBeenCalled()
+		expect(stderrSpy).not.toHaveBeenCalled()
 		expect(fileChunks).toEqual(["stdout chunk\n", "stderr chunk\n"])
 	})
 
@@ -1122,7 +1182,6 @@ describe("src/cli.ts wiring", () => {
 
 		handlers.onStdoutChunk("stdout chunk\n")
 		handlers.onStderrChunk("stderr chunk\n")
-		handlers.flushBufferedTerminalOutput()
 
 		expect(stdoutSpy).toHaveBeenCalledWith("stdout chunk\n")
 		expect(stderrSpy).toHaveBeenCalledWith("stderr chunk\n")

@@ -51,6 +51,8 @@ export interface TPM2Options {
 	outputMode?: TBuildOutputMode
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 ```
 
