@@ -2,6 +2,7 @@
 
 import { cli, define } from "gunshi"
 import { createWriteStream, promises as fs, type WriteStream } from "node:fs"
+import * as os from "node:os"
 import * as path from "node:path"
 import type { TBuildOutputMode } from "./build.js"
 import { runBuild } from "./build.js"
@@ -35,7 +36,6 @@ import {
 import { updatePM2App } from "./pm2.js"
 import { syncBuild } from "./syncBuild.js"
 import { runTests } from "./test.js"
-import { interactiveSpawn } from "./interactiveSpawn.js"
 
 // Exit semantics:
 // - Fatal phases: configuration, tests, build, sync, churn-only (exit code 1 via handleFatalError).
@@ -50,17 +50,62 @@ const FATAL_DEPLOY_ERROR = Symbol("FATAL_DEPLOY_ERROR")
 interface TRunLogWriter {
 	writeLine(line: string): void
 	writeChunk(chunk: string): void
+	writeEvent(event: TDeployLogEvent): void
 	close(): Promise<void>
 	path: string
 }
 
 interface TPhaseOutputHandlers {
-	outputMode: "callbacks"
-	onStdoutChunk: (chunk: string) => void
-	onStderrChunk: (chunk: string) => void
+	outputMode: TBuildOutputMode
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 type TTestPhaseOutputHandlers = TPhaseOutputHandlers
+type TDeployPhase = "deploy" | "tests" | "build" | "sync" | "pm2" | "churn"
+type TDeployLogKind =
+	| "start"
+	| "command"
+	| "summary"
+	| "result"
+	| "error"
+	| "output"
+
+interface TDeployLogEvent {
+	timestamp: string
+	phase: TDeployPhase
+	kind: TDeployLogKind
+	message?: string
+	data?: Record<string, unknown>
+}
+
+interface TVitestAssertionResult {
+	fullName: string
+	status: string
+	title: string
+	failureMessages?: string[]
+}
+
+interface TVitestSuiteResult {
+	name: string
+	status: string
+	message?: string
+	assertionResults?: TVitestAssertionResult[]
+}
+
+interface TVitestJsonReport {
+	success: boolean
+	numTotalTestSuites: number
+	numPassedTestSuites: number
+	numFailedTestSuites: number
+	numPendingTestSuites: number
+	numTotalTests: number
+	numPassedTests: number
+	numFailedTests: number
+	numPendingTests: number
+	numTodoTests: number
+	testResults?: TVitestSuiteResult[]
+}
 
 interface TDeployArgs {
 	sshConnectionString: string
@@ -279,6 +324,21 @@ async function runBuildPhase(
 		logPhaseSuccess("Build skipped (per --skipBuild / -k).")
 		return
 	}
+	writeDeployLogEvent(logWriter, {
+		phase: "build",
+		kind: "start",
+		message: "Running build",
+	})
+	writeDeployLogEvent(logWriter, {
+		phase: "build",
+		kind: "command",
+		message: "Executing build command",
+		data: {
+			command: values.buildCommand,
+			args: values.buildArgs,
+			cwd: process.cwd(),
+		},
+	})
 	const handlers = createPhaseOutputHandlers(values, logWriter)
 	try {
 		await runBuild(
@@ -291,11 +351,16 @@ async function runBuildPhase(
 				outputMode: handlers.outputMode,
 				onStdoutChunk: handlers.onStdoutChunk,
 				onStderrChunk: handlers.onStderrChunk,
-				interactiveSpawn: values.verbose ? interactiveSpawn : undefined,
 			},
 		)
+		writeDeployLogEvent(logWriter, {
+			phase: "build",
+			kind: "result",
+			message: "Build completed successfully",
+		})
 		logPhaseSuccess("Build completed successfully.")
 	} catch (err) {
+		writePhaseErrorEvent(logWriter, "build", err)
 		handleFatalError("Build", err, values.profileName)
 	}
 }
@@ -309,20 +374,54 @@ async function runTestPhase(
 		logPhaseSuccess("Test suite skipped (per --skipTests / -T).")
 		return
 	}
+	writeDeployLogEvent(logWriter, {
+		phase: "tests",
+		kind: "start",
+		message: "Running test suite",
+	})
 	const handlers = createTestPhaseOutputHandlers(values, logWriter)
+	const reportArtifact = logWriter
+		? await createVitestReportArtifact()
+		: undefined
+	const testArgs = createDeployVitestArgs(reportArtifact?.reportPath)
+	writeDeployLogEvent(logWriter, {
+		phase: "tests",
+		kind: "command",
+		message: "Executing test command",
+		data: {
+			command: "npx",
+			args: testArgs,
+			cwd: process.cwd(),
+			reportPath: reportArtifact?.reportPath,
+		},
+	})
+	let phaseError: unknown
 	try {
 		await runTests({
 			testBin: "npx",
-			testArgs: ["vitest", "run", "--reporter=verbose"],
+			testArgs,
 			outputMode: handlers.outputMode,
 			onStdoutChunk: handlers.onStdoutChunk,
 			onStderrChunk: handlers.onStderrChunk,
-			interactiveSpawn: values.verbose ? interactiveSpawn : undefined,
 		})
-		logPhaseSuccess("Test suite completed successfully.")
 	} catch (err) {
-		handleFatalError("Tests", err, values.profileName)
+		phaseError = err
+	} finally {
+		if (reportArtifact) {
+			await writeVitestReportToDeployLog(logWriter, reportArtifact.reportPath)
+			await fs.rm(reportArtifact.dir, { recursive: true, force: true })
+		}
 	}
+	if (phaseError) {
+		writePhaseErrorEvent(logWriter, "tests", phaseError)
+		handleFatalError("Tests", phaseError, values.profileName)
+	}
+	writeDeployLogEvent(logWriter, {
+		phase: "tests",
+		kind: "result",
+		message: "Test suite completed successfully",
+	})
+	logPhaseSuccess("Test suite completed successfully.")
 }
 
 async function runSyncPhase(
@@ -330,6 +429,11 @@ async function runSyncPhase(
 	logWriter?: TRunLogWriter,
 ): Promise<void> {
 	logPhaseStart("Syncing client bundle to server")
+	writeDeployLogEvent(logWriter, {
+		phase: "sync",
+		kind: "start",
+		message: "Syncing client bundle to server",
+	})
 	const handlers = createPhaseOutputHandlers(values, logWriter)
 	const options = {
 		sshConnectionString: values.sshConnectionString,
@@ -339,13 +443,33 @@ async function runSyncPhase(
 		outputMode: handlers.outputMode as TBuildOutputMode,
 		onStdoutChunk: handlers.onStdoutChunk,
 		onStderrChunk: handlers.onStderrChunk,
-		interactiveSpawn: values.verbose ? interactiveSpawn : undefined,
 	}
+	writeDeployLogEvent(logWriter, {
+		phase: "sync",
+		kind: "command",
+		message: "Executing sync commands",
+		data: {
+			sshConnectionString: values.sshConnectionString,
+			remoteDir: values.remoteDir,
+			localOutputDir: values.buildDir,
+			dryRun: values.dryRun,
+		},
+	})
 
 	try {
 		await syncBuild(options)
+		writeDeployLogEvent(logWriter, {
+			phase: "sync",
+			kind: "result",
+			message: "Client bundle sync complete",
+			data: {
+				dryRun: values.dryRun,
+				remoteDir: values.remoteDir,
+			},
+		})
 		logPhaseSuccess("Client bundle sync complete.")
 	} catch (err) {
+		writePhaseErrorEvent(logWriter, "sync", err)
 		handleFatalError("Build sync", err, values.profileName)
 	}
 }
@@ -360,7 +484,28 @@ async function runPm2Phase(
 		return
 	}
 
+	writeDeployLogEvent(logWriter, {
+		phase: "pm2",
+		kind: "start",
+		message: "Updating PM2 app",
+		data: {
+			appName: values.pm2AppName,
+			restartMode: values.pm2RestartMode,
+		},
+	})
 	const handlers = createPhaseOutputHandlers(values, logWriter)
+	writeDeployLogEvent(logWriter, {
+		phase: "pm2",
+		kind: "command",
+		message: "Executing PM2 update workflow",
+		data: {
+			sshConnectionString: values.sshConnectionString,
+			remoteDir: values.remoteDir,
+			appName: values.pm2AppName,
+			env: values.env,
+			restartMode: values.pm2RestartMode,
+		},
+	})
 	try {
 		const result = await updatePM2App({
 			sshConnectionString: values.sshConnectionString,
@@ -371,7 +516,17 @@ async function runPm2Phase(
 			outputMode: handlers.outputMode,
 			onStdoutChunk: handlers.onStdoutChunk,
 			onStderrChunk: handlers.onStderrChunk,
-			interactiveSpawn: values.verbose ? interactiveSpawn : undefined,
+		})
+		writeDeployLogEvent(logWriter, {
+			phase: "pm2",
+			kind: "result",
+			message: "PM2 update complete",
+			data: {
+				configChanged: result.configChanged,
+				instanceCount: result.instanceCount,
+				appName: values.pm2AppName,
+				restartMode: values.pm2RestartMode,
+			},
 		})
 		logPm2Success({
 			appName: values.pm2AppName,
@@ -380,6 +535,7 @@ async function runPm2Phase(
 			profileName: values.profileName,
 		})
 	} catch (err) {
+		writePhaseErrorEvent(logWriter, "pm2", err)
 		if (err instanceof Error && err.cause === "PM2_APP_NAME_NOT_FOUND") {
 			handleFatalError("PM2 update", err, values.profileName)
 		} else {
@@ -752,47 +908,36 @@ function createPhaseOutputHandlers(
 ): TPhaseOutputHandlers {
 	if (values.verbose) {
 		return {
-			outputMode: "callbacks",
-			onStdoutChunk: createTerminalAndFileChunkWriter(
-				process.stdout,
-				logWriter,
-			),
-			onStderrChunk: createTerminalAndFileChunkWriter(
-				process.stderr,
-				logWriter,
-			),
+			outputMode: "inherit",
 		}
 	}
 
 	if (logWriter) {
 		return {
 			outputMode: "callbacks",
-			onStdoutChunk: createFileChunkWriter(logWriter),
-			onStderrChunk: createFileChunkWriter(logWriter),
+			onStdoutChunk: createFileChunkWriter(logWriter, "stdout"),
+			onStderrChunk: createFileChunkWriter(logWriter, "stderr"),
 		}
 	}
 
 	return {
-		outputMode: "callbacks",
-		onStdoutChunk: noop,
-		onStderrChunk: noop,
-	}
-}
-
-function createTerminalAndFileChunkWriter(
-	stream: NodeJS.WriteStream,
-	logWriter?: TRunLogWriter,
-): (chunk: string) => void {
-	return (chunk: string) => {
-		stream.write(chunk)
-		logWriter?.writeChunk(chunk)
+		outputMode: "silent",
 	}
 }
 
 function createFileChunkWriter(
 	logWriter: TRunLogWriter,
+	streamName: "stdout" | "stderr",
 ): (chunk: string) => void {
 	return (chunk: string) => {
+		writeDeployLogEvent(logWriter, {
+			phase: "deploy",
+			kind: "output",
+			data: {
+				stream: streamName,
+				chunk,
+			},
+		})
 		logWriter.writeChunk(chunk)
 	}
 }
@@ -876,6 +1021,9 @@ function createStreamLogWriter(
 		writeChunk: (chunk) => {
 			stream.write(chunk)
 		},
+		writeEvent: (event) => {
+			stream.write(`[deploy-record] ${JSON.stringify(event)}\n`)
+		},
 		close: async () => {
 			if (stream.closed || stream.destroyed) return
 			await new Promise<void>((resolve, reject) => {
@@ -888,6 +1036,109 @@ function createStreamLogWriter(
 				})
 			})
 		},
+	}
+}
+
+function writeDeployLogEvent(
+	logWriter: TRunLogWriter | undefined,
+	event: Omit<TDeployLogEvent, "timestamp">,
+): void {
+	logWriter?.writeEvent({
+		timestamp: new Date().toISOString(),
+		...event,
+	})
+}
+
+function writePhaseErrorEvent(
+	logWriter: TRunLogWriter | undefined,
+	phase: TDeployPhase,
+	err: unknown,
+): void {
+	writeDeployLogEvent(logWriter, {
+		phase,
+		kind: "error",
+		message: toErrorMessage(err),
+		data: {
+			code: err instanceof Error && typeof err.cause === "string" ? err.cause : undefined,
+		},
+	})
+}
+
+function createDeployVitestArgs(reportPath?: string): string[] {
+	const args = ["vitest", "run", "--reporter=verbose"]
+	if (reportPath) {
+		args.push("--reporter=json", `--outputFile.json=${reportPath}`)
+	}
+	return args
+}
+
+async function createVitestReportArtifact(): Promise<{
+	dir: string
+	reportPath: string
+}> {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "deploy-vitest-"))
+	return {
+		dir,
+		reportPath: path.join(dir, "vitest-report.json"),
+	}
+}
+
+async function writeVitestReportToDeployLog(
+	logWriter: TRunLogWriter | undefined,
+	reportPath: string,
+): Promise<void> {
+	if (!logWriter) return
+	try {
+		const content = await fs.readFile(reportPath, "utf8")
+		const report = JSON.parse(content) as TVitestJsonReport
+		writeDeployLogEvent(logWriter, {
+			phase: "tests",
+			kind: "summary",
+			message: "Vitest JSON report",
+			data: {
+				success: report.success,
+				numTotalTestSuites: report.numTotalTestSuites,
+				numPassedTestSuites: report.numPassedTestSuites,
+				numFailedTestSuites: report.numFailedTestSuites,
+				numPendingTestSuites: report.numPendingTestSuites,
+				numTotalTests: report.numTotalTests,
+				numPassedTests: report.numPassedTests,
+				numFailedTests: report.numFailedTests,
+				numPendingTests: report.numPendingTests,
+				numTodoTests: report.numTodoTests,
+			},
+		})
+		for (const suite of report.testResults ?? []) {
+			writeDeployLogEvent(logWriter, {
+				phase: "tests",
+				kind: "result",
+				message: suite.name,
+				data: {
+					status: suite.status,
+					message: suite.message,
+				},
+			})
+			for (const assertion of suite.assertionResults ?? []) {
+				writeDeployLogEvent(logWriter, {
+					phase: "tests",
+					kind: "result",
+					message: assertion.fullName,
+					data: {
+						title: assertion.title,
+						status: assertion.status,
+						failureMessages: assertion.failureMessages ?? [],
+						file: suite.name,
+					},
+				})
+			}
+		}
+	} catch (err) {
+		writeDeployLogEvent(logWriter, {
+			phase: "tests",
+			kind: "error",
+			message: `Failed to read Vitest JSON report: ${toErrorMessage(err)}`,
+			data: { reportPath },
+		})
 	}
 }
 
@@ -962,6 +1213,8 @@ export const __test__: Record<string, unknown> = {
 	createTestPhaseOutputHandlers,
 	isFatalDeployError,
 	createPhaseOutputHandlers,
+	createDeployVitestArgs,
+	writeVitestReportToDeployLog,
 	resolveLogFilePath,
 	formatRunTimestamp,
 	noop,

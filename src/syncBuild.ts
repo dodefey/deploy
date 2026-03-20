@@ -3,7 +3,6 @@ import { promises as fs } from "node:fs"
 import * as path from "node:path"
 
 import type { TBuildOutputMode } from "./build.ts"
-import type { TInteractiveSpawn } from "./interactiveSpawn.js"
 
 export interface TSyncBuildOptions {
 	sshConnectionString: string
@@ -15,7 +14,6 @@ export interface TSyncBuildOptions {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
-	interactiveSpawn?: TInteractiveSpawn
 }
 
 export type TSyncBuildErrorCode =
@@ -29,7 +27,6 @@ type TRunOptions = {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
-	interactiveSpawn?: TInteractiveSpawn
 }
 
 type TRunResult = {
@@ -50,7 +47,6 @@ export async function syncBuild(options: TSyncBuildOptions): Promise<void> {
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
-		interactiveSpawn,
 	} = options
 
 	const runOptions: TRunOptions = {
@@ -59,7 +55,6 @@ export async function syncBuild(options: TSyncBuildOptions): Promise<void> {
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
-		interactiveSpawn,
 	}
 	const localDir = resolveLocalDir(localOutputDir)
 
@@ -120,6 +115,7 @@ async function ensureRemoteDir(
 		"ssh",
 		[sshConnectionString, `mkdir -p ${quotedDir}`],
 		runOptions,
+		{ captureOutput: false },
 	)
 
 	if (result.spawnError) {
@@ -180,6 +176,7 @@ function runCommand(
 	command: string,
 	args: string[],
 	runOptions: TRunOptions,
+	behavior: { captureOutput?: boolean } = {},
 ): Promise<TRunResult> {
 	return new Promise((resolve) => {
 		let stdout = ""
@@ -193,31 +190,7 @@ function runCommand(
 			resolve(result)
 		}
 
-		const stdio = resolveStdio(runOptions.outputMode)
-		if (runOptions.interactiveSpawn && runOptions.outputMode === "callbacks") {
-			const onOutput = createCombinedOutputForwarder(runOptions, (chunk) => {
-				stdout += chunk
-				stderr += chunk
-			})
-			runOptions.interactiveSpawn({
-				command,
-				args,
-				cwd: process.cwd(),
-				env: process.env,
-				onOutput,
-			})
-				.then((result) => {
-					finish({ code: result.code, stdout, stderr, spawnError })
-				})
-				.catch((err) => {
-					spawnError =
-						err instanceof Error ? err.message : String(err)
-					stderr += spawnError
-					finish({ code: 1, stdout, stderr, spawnError })
-				})
-			return
-		}
-
+		const stdio = resolveStdio(runOptions.outputMode, behavior.captureOutput === true)
 		const child = spawn(command, args, { stdio } as SpawnOptions)
 
 		if (runOptions.outputMode === "callbacks") {
@@ -238,15 +211,6 @@ function runCommand(
 			child.stderr?.on("data", (chunk) => {
 				stderr += String(chunk)
 			})
-		} else {
-			child.stdout?.on("data", (chunk) => {
-				const text = String(chunk)
-				stdout += text
-			})
-			child.stderr?.on("data", (chunk) => {
-				const text = String(chunk)
-				stderr += text
-			})
 		}
 
 		child.on("error", (err) => {
@@ -259,44 +223,6 @@ function runCommand(
 			finish({ code, stdout, stderr, spawnError })
 		})
 	})
-}
-
-function createCombinedOutputForwarder(
-	runOptions: TRunOptions,
-	collect: (chunk: string) => void,
-): (chunk: string) => void {
-	if (runOptions.onStdoutChunk) {
-		return (chunk: string) => {
-			runOptions.onStdoutChunk?.(chunk)
-			collect(chunk)
-		}
-	}
-	if (runOptions.onStderrChunk) {
-		return (chunk: string) => {
-			runOptions.onStderrChunk?.(chunk)
-			collect(chunk)
-		}
-	}
-	if (runOptions.onStdoutLine) {
-		return createLineCollectingForwarder(runOptions.onStdoutLine, collect)
-	}
-	if (runOptions.onStderrLine) {
-		return createLineCollectingForwarder(runOptions.onStderrLine, collect)
-	}
-	return collect
-}
-
-function createLineCollectingForwarder(
-	onLine: (line: string) => void,
-	collect: (chunk: string) => void,
-): (chunk: string) => void {
-	let buffer = ""
-
-	return (chunk: string) => {
-		collect(chunk)
-		buffer += chunk
-		buffer = flushLines(buffer, onLine, () => {})
-	}
 }
 
 function wireCallbacks(
@@ -373,9 +299,10 @@ function flushLines(
 
 function resolveStdio(
 	outputMode: TBuildOutputMode,
+	captureOutput: boolean,
 ): "inherit" | ["ignore", "ignore", "ignore"] | ["ignore", "pipe", "pipe"] {
 	if (outputMode === "silent") return ["ignore", "ignore", "ignore"]
-	if (outputMode === "callbacks") return ["ignore", "pipe", "pipe"]
+	if (outputMode === "callbacks" || captureOutput) return ["ignore", "pipe", "pipe"]
 	return "inherit"
 }
 

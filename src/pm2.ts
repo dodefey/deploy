@@ -1,9 +1,8 @@
-import { spawn } from "node:child_process"
+import { spawn, type SpawnOptions } from "node:child_process"
 import { promises as fs } from "node:fs"
 import * as path from "node:path"
 
 import type { TBuildOutputMode } from "./build.ts"
-import type { TInteractiveSpawn } from "./interactiveSpawn.js"
 
 const DEFAULT_SSH_OPTS = [
 	"-4",
@@ -29,7 +28,6 @@ export interface TPM2Options {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
-	interactiveSpawn?: TInteractiveSpawn
 }
 
 export interface TPM2Result {
@@ -59,7 +57,6 @@ type TRunSshOptions = {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
-	interactiveSpawn?: TInteractiveSpawn
 }
 
 export async function updatePM2App(options: TPM2Options): Promise<TPM2Result> {
@@ -75,7 +72,6 @@ export async function updatePM2App(options: TPM2Options): Promise<TPM2Result> {
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
-		interactiveSpawn,
 	} = options
 
 	const sshRunOptions: TRunSshOptions = {
@@ -84,7 +80,6 @@ export async function updatePM2App(options: TPM2Options): Promise<TPM2Result> {
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
-		interactiveSpawn,
 	}
 
 	const localConfigContent = await readLocalConfig(localEcosystemPath)
@@ -151,6 +146,7 @@ async function readRemoteConfig(
 		sshConnectionString,
 		`test -f ${quotedPath}`,
 		sshOptions,
+		{ captureOutput: true },
 	)
 
 	if (exists.spawnError) {
@@ -173,6 +169,7 @@ async function readRemoteConfig(
 		sshConnectionString,
 		`cat ${quotedPath}`,
 		sshOptions,
+		{ captureOutput: true },
 	)
 
 	if (content.spawnError) {
@@ -242,6 +239,7 @@ async function restartPm2(
 			sshConnectionString,
 			command,
 			sshOptions,
+			{},
 		)
 		if (result.spawnError) {
 			throw pm2Error("PM2_SSH_FAILED", result.spawnError)
@@ -260,6 +258,7 @@ async function restartPm2(
 		sshConnectionString,
 		`pm2 delete ${shellQuoteSingle(appName)}`,
 		sshOptions,
+		{},
 	)
 	if (deleteResult.spawnError) {
 		throw pm2Error("PM2_SSH_FAILED", deleteResult.spawnError)
@@ -273,6 +272,7 @@ async function restartPm2(
 			`pm2 start ecosystem.config.js --env ${shellQuoteSingle(env)}`,
 		].join(" && "),
 		sshOptions,
+		{},
 	)
 	if (startResult.spawnError) {
 		throw pm2Error("PM2_SSH_FAILED", startResult.spawnError)
@@ -300,6 +300,7 @@ async function verifyPM2Health(
 			sshConnectionString,
 			"pm2 jlist",
 			sshOptions,
+			{ captureOutput: true },
 		)
 		if (result.spawnError) {
 			throw pm2Error("PM2_SSH_FAILED", result.spawnError)
@@ -347,6 +348,7 @@ async function ensurePm2AppExists(
 		sshConnectionString,
 		"pm2 jlist",
 		sshOptions,
+		{ captureOutput: true },
 	)
 
 	if (result.spawnError || result.code !== 0) {
@@ -474,6 +476,7 @@ function runSshCommand(
 	sshConnectionString: string,
 	command: string,
 	sshOptions: TRunSshOptions,
+	behavior: { captureOutput?: boolean } = {},
 ): Promise<TSshResult> {
 	return new Promise((resolve) => {
 		let stdout = ""
@@ -487,30 +490,10 @@ function runSshCommand(
 			resolve(result)
 		}
 
-		const stdio = resolveStdio(sshOptions.outputMode)
-		if (sshOptions.interactiveSpawn && sshOptions.outputMode === "callbacks") {
-			const onOutput = createCombinedOutputForwarder(sshOptions, (chunk) => {
-				stdout += chunk
-				stderr += chunk
-			})
-			sshOptions
-				.interactiveSpawn({
-					command: "ssh",
-					args: [...DEFAULT_SSH_OPTS, sshConnectionString, command],
-					cwd: process.cwd(),
-					env: process.env,
-					onOutput,
-				})
-				.then((result) => {
-					finish({ code: result.code, stdout, stderr, spawnError })
-				})
-				.catch((err) => {
-					spawnError = toMessage(err)
-					stderr += spawnError
-					finish({ code: 1, stdout, stderr, spawnError })
-				})
-			return
-		}
+		const stdio = resolveStdio(
+			sshOptions.outputMode,
+			behavior.captureOutput === true,
+		)
 
 		const child = spawn(
 			"ssh",
@@ -536,22 +519,20 @@ function runSshCommand(
 				flushRemaining()
 				finish({ code, stdout, stderr, spawnError })
 			})
-		} else {
+		} else if (stdio !== "inherit") {
 			child.stdout?.on("data", (chunk) => {
 				const text = String(chunk)
 				stdout += text
-				if (sshOptions.outputMode === "inherit") {
-					process.stdout.write(text)
-				}
 			})
 			child.stderr?.on("data", (chunk) => {
 				const text = String(chunk)
 				stderr += text
-				if (sshOptions.outputMode === "inherit") {
-					process.stderr.write(text)
-				}
 			})
 
+			child.on("close", (code) => {
+				finish({ code, stdout, stderr, spawnError })
+			})
+		} else {
 			child.on("close", (code) => {
 				finish({ code, stdout, stderr, spawnError })
 			})
@@ -565,49 +546,12 @@ function runSshCommand(
 	})
 }
 
-function createCombinedOutputForwarder(
-	sshOptions: TRunSshOptions,
-	collect: (chunk: string) => void,
-): (chunk: string) => void {
-	if (sshOptions.onStdoutChunk) {
-		return (chunk: string) => {
-			sshOptions.onStdoutChunk?.(chunk)
-			collect(chunk)
-		}
-	}
-	if (sshOptions.onStderrChunk) {
-		return (chunk: string) => {
-			sshOptions.onStderrChunk?.(chunk)
-			collect(chunk)
-		}
-	}
-	if (sshOptions.onStdoutLine) {
-		return createLineCollectingForwarder(sshOptions.onStdoutLine, collect)
-	}
-	if (sshOptions.onStderrLine) {
-		return createLineCollectingForwarder(sshOptions.onStderrLine, collect)
-	}
-	return collect
-}
-
-function createLineCollectingForwarder(
-	onLine: (line: string) => void,
-	collect: (chunk: string) => void,
-): (chunk: string) => void {
-	let buffer = ""
-
-	return (chunk: string) => {
-		collect(chunk)
-		buffer += chunk
-		buffer = flushLines(buffer, onLine, () => {})
-	}
-}
-
 function resolveStdio(
 	outputMode: TBuildOutputMode,
-): ["ignore", "ignore", "ignore"] | ["ignore", "pipe", "pipe"] {
+	captureOutput: boolean,
+): SpawnOptions["stdio"] {
 	if (outputMode === "silent") return ["ignore", "ignore", "ignore"]
-	// Use pipes even in inherit so we can still capture output for logic.
+	if (outputMode === "inherit" && !captureOutput) return "inherit"
 	return ["ignore", "pipe", "pipe"]
 }
 

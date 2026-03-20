@@ -235,33 +235,6 @@ describe("output mode wiring", () => {
 		expect(stderrChunks).toEqual(["warn\r\nnext"])
 	})
 
-	it("uses interactive spawn when provided", async () => {
-		const output: string[] = []
-		const interactiveSpawn = vi.fn(async ({ onOutput }: any) => {
-			onOutput("interactive build\r\n")
-			return { code: 0, signal: null }
-		})
-
-		await expect(
-			runBuild(
-				commandSpec,
-				withSpawn({
-					outputMode: "callbacks",
-					onStdoutChunk: (chunk) => output.push(chunk),
-					interactiveSpawn,
-					spawnImpl: vi.fn(),
-				}),
-			),
-		).resolves.toBeUndefined()
-
-		expect(interactiveSpawn).toHaveBeenCalledWith(
-			expect.objectContaining({
-				command: "custom",
-				args: ["build"],
-			}),
-		)
-		expect(output).toEqual(["interactive build\r\n"])
-	})
 })
 
 describe("missing callback behavior", () => {

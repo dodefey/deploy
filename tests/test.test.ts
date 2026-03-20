@@ -254,24 +254,6 @@ describe("runTests", () => {
 		expect(stderrChunks).toEqual(["err1\nerr2"])
 	})
 
-	it("uses interactive spawn when provided", async () => {
-		const output: string[] = []
-
-		await expect(
-			runTests({
-				outputMode: "callbacks",
-				onStdoutChunk: (chunk) => output.push(chunk),
-				interactiveSpawn: async ({ onOutput }) => {
-					onOutput("interactive tests\r\n")
-					return { code: 0, signal: null }
-				},
-			}),
-		).resolves.toBeUndefined()
-
-		expect(output).toEqual(["interactive tests\r\n"])
-		expect(spawnMock).not.toHaveBeenCalled()
-	})
-
 	it("callbacks mode works with no callbacks provided", async () => {
 		const child = new FakeChildProcess()
 		child.stdout = new PassThrough()

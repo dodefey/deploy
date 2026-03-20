@@ -101,12 +101,12 @@ If `--churnOnly` is set:
 
 - Logs phase start.
 - Skips when `skipTests` is true.
-- Uses `runTests` with callback wiring in both quiet and verbose modes.
-- Deploy-mode test execution uses `npx vitest run --reporter=verbose` so logs enumerate individual test cases and outcomes.
+- Uses `runTests` with inherited stdio in verbose mode and callback capture only in quiet mode when file logging is enabled.
+- Deploy-mode test execution uses `npx vitest run --reporter=verbose`, and when file logging is enabled it also enables a JSON reporter artifact so the deploy log can enumerate individual test cases and outcomes.
 - In verbose mode, terminal output for the test phase must match exactly what the user would see if they ran the underlying test command directly in the terminal.
 - That requirement includes the live Vitest terminal stream: startup banner, incremental `Test Files` / `Tests` counters, per-file progress lines such as `❯ ... 0/7`, queued/running transitions, and other TTY-visible status output that appears during a normal direct run.
-- Verbose test execution must therefore use an interactive/PTY-backed transport rather than ordinary piped stdio forwarding.
-- Quiet mode writes raw stdout/stderr chunks to the optional log file immediately and does not replay them to the terminal.
+- Verbose test execution must preserve direct terminal behavior by letting the test command own the terminal through inherited stdio.
+- Quiet mode may write raw stdout/stderr chunks to the optional log file and does not replay them to the terminal.
 - If file logging is enabled, the run log must record which tests were run and the final pass/fail outcome for those tests, including failed test names and assertion details when failures occur.
 - Failure is fatal.
 
@@ -115,26 +115,26 @@ If `--churnOnly` is set:
 - Logs phase start.
 - Skips when `skipBuild` is true.
 - Uses profile-defined `buildCommand`/`buildArgs`.
-- Uses callback wiring in both quiet and verbose modes.
-- Verbose build execution must use an interactive/PTY-backed transport so the user sees the same substantive terminal stream as a direct local build command.
-- In quiet mode, child output is written only to the optional deploy log file.
+- Uses inherited stdio in verbose mode and optional callback capture only in quiet mode when file logging is enabled.
+- Verbose build execution must preserve direct terminal behavior so the user sees the same substantive terminal stream as a direct local build command.
+- In quiet mode, child output may be written to the optional deploy log file.
 - Failure is fatal.
 
 ### 5.3 Sync
 
 - Uses `syncBuild` with resolved paths and `dryRun`.
-- Uses callback wiring in both quiet and verbose modes.
-- Verbose sync execution must use an interactive/PTY-backed transport for surfaced ssh/rsync commands so terminal output matches direct command behavior.
-- In quiet mode, child output is written only to the optional deploy log file.
+- Uses inherited stdio in verbose mode for surfaced commands and optional callback capture only in quiet mode when file logging is enabled.
+- Verbose sync execution must preserve direct command behavior for surfaced ssh/rsync commands.
+- In quiet mode, child output may be written to the optional deploy log file.
 - Failure is fatal.
 
 ### 5.4 PM2
 
 - Skips remote update when `dryRun` is true.
 - Uses `updatePM2App` otherwise.
-- Uses callback wiring in both quiet and verbose modes.
-- Verbose PM2 execution must use an interactive/PTY-backed transport for surfaced ssh/PM2 commands so terminal output matches direct command behavior.
-- In quiet mode, child output is written only to the optional deploy log file.
+- Uses inherited stdio in verbose mode for surfaced commands and optional callback capture only in quiet mode when file logging is enabled.
+- Verbose PM2 execution must preserve direct command behavior for surfaced ssh/PM2 commands.
+- In quiet mode, child output may be written to the optional deploy log file.
 - `PM2_APP_NAME_NOT_FOUND` is fatal.
 - Other PM2 failures are non-fatal and logged as degraded-success.
 
@@ -165,7 +165,7 @@ If `--churnOnly` is set:
 - churn summary (`logChurnSummary`)
 - fatal and non-fatal error logs
 
-If profile file logging is enabled, the same deploy logs are also written to the run log file. That file must also contain all child output from tests, build, sync, and PM2. For the test phase, the log must contain the observed test execution details and outcomes: which tests ran, which passed, and which failed if any, including failure details before the process exits.
+If profile file logging is enabled, the same deploy logs are also written to the run log file. That file is a separate deploy record: it must contain lifecycle lines, command metadata, typed errors, phase results, and enough phase-specific detail to reconstruct what happened. For the test phase, the log must contain the observed test execution details and outcomes: which tests ran, which passed, and which failed if any, including failure details before the process exits.
 
 ---
 

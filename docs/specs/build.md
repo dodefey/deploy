@@ -93,7 +93,7 @@ The build module controls only process stdio wiring. It does **not** log status 
 
 1. **inherit** (default): spawn with inherited stdio so child output appears in the parent terminal.
 2. **silent**: spawn with stdout/stderr ignored.
-3. **callbacks**: pipe stdout/stderr, or in deploy-verbose orchestration use an interactive/PTY-backed transport while still forwarding raw output to callbacks.
+3. **callbacks**: pipe stdout/stderr and forward raw output to callbacks for quiet-mode capture or custom logging.
     - When chunk callbacks are provided, raw output is forwarded without rewriting.
     - If only line callbacks are provided, output may be line-split before callback delivery.
     - If `outputMode === "callbacks"` but no callbacks are provided, output is effectively discarded or only internally collected for control flow.

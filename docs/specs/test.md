@@ -112,7 +112,7 @@ Although “logging” isn’t the module’s primary concern, the caller must b
 
 - Printed directly to the terminal (normal local use).
 - Silenced (e.g., very noisy CI environments).
-- Captured and piped to a log file or logger.
+- Captured and piped to a quiet-mode log collector when the caller wants a separate machine/log channel.
 
 To support that **without** the test module itself knowing about files or UI, we define the following output behavior contract:
 
@@ -174,9 +174,9 @@ No changes to success semantics: success is still “did not throw.”
 
 For deploy-orchestrated usage, the caller may impose stronger guarantees on top of callback mode:
 
-- In verbose mode, the terminal output shown to the user must match exactly what they would see if the test command were run directly in that terminal.
-- Deploy-verbose orchestration may therefore use an interactive/PTY-backed transport instead of ordinary piped stdio forwarding.
-- The deploy orchestrator may choose a more explicit test reporter than the generic module default so persisted logs enumerate test names and outcomes.
+- In verbose mode, the terminal output shown to the user must match what they would see if the test command were run directly in that terminal.
+- Deploy orchestration should therefore prefer inherited stdio for the human channel instead of piped stdio forwarding.
+- The deploy orchestrator may choose a more explicit secondary reporter than the generic module default so persisted logs enumerate test names and outcomes without stealing the live terminal stream.
 - When file logging is enabled, the persisted log must show which tests ran and their outcomes, including which tests passed and which tests failed if any, with failed test names and assertion details.
 
 ---

@@ -445,7 +445,7 @@ describe("src/cli.ts wiring", () => {
 		expect(args.logging).toEqual(cfg.logging)
 	})
 
-	it("createPhaseOutputHandlers suppresses child output when verbose is false", async () => {
+	it("createPhaseOutputHandlers suppresses child output when quiet and file logging is disabled", async () => {
 		setupMocks()
 		const { __test__ } = await importMain()
 		const stdoutSpy = vi
@@ -471,11 +471,9 @@ describe("src/cli.ts wiring", () => {
 			profileName: "p",
 		})
 
-		expect(handlers.outputMode).toBe("callbacks")
-		expect(handlers.onStdoutChunk).toBeDefined()
-		expect(handlers.onStderrChunk).toBeDefined()
-		expect(handlers.onStdoutChunk("hello")).toBeUndefined()
-		expect(handlers.onStderrChunk("oops")).toBeUndefined()
+		expect(handlers.outputMode).toBe("silent")
+		expect(handlers.onStdoutChunk).toBeUndefined()
+		expect(handlers.onStderrChunk).toBeUndefined()
 		expect(stdoutSpy).not.toHaveBeenCalled()
 		expect(stderrSpy).not.toHaveBeenCalled()
 	})
@@ -512,6 +510,7 @@ describe("src/cli.ts wiring", () => {
 				path: "/tmp/test.log",
 				writeLine: (line) => chunks.push(line),
 				writeChunk: (chunk) => chunks.push(chunk),
+				writeEvent: () => {},
 				close: () => Promise.resolve(),
 			},
 		)
@@ -524,7 +523,7 @@ describe("src/cli.ts wiring", () => {
 		expect(chunks).toEqual(["hello\n", "oops\n"])
 	})
 
-	it("createPhaseOutputHandlers tees child output to console and file when verbose is true", async () => {
+	it("createPhaseOutputHandlers uses inherit mode when verbose is true", async () => {
 		setupMocks()
 		const { __test__ } = await importMain()
 		const stdoutSpy = vi
@@ -533,8 +532,6 @@ describe("src/cli.ts wiring", () => {
 		const stderrSpy = vi
 			.spyOn(process.stderr, "write")
 			.mockReturnValue(true as any)
-		const lines: string[] = []
-
 		const handlers = __test__.createPhaseOutputHandlers(
 			{
 				sshConnectionString: "s",
@@ -554,18 +551,18 @@ describe("src/cli.ts wiring", () => {
 			},
 			{
 				path: "/tmp/test.log",
-				writeLine: (line) => lines.push(line),
-				writeChunk: (chunk) => lines.push(chunk),
+				writeLine: () => {},
+				writeChunk: () => {},
+				writeEvent: () => {},
 				close: () => Promise.resolve(),
 			},
 		)
 
-		handlers.onStdoutChunk("hello\n")
-		handlers.onStderrChunk("oops\n")
-
-		expect(stdoutSpy).toHaveBeenCalledWith("hello\n")
-		expect(stderrSpy).toHaveBeenCalledWith("oops\n")
-		expect(lines).toEqual(["hello\n", "oops\n"])
+		expect(handlers.outputMode).toBe("inherit")
+		expect(handlers.onStdoutChunk).toBeUndefined()
+		expect(handlers.onStderrChunk).toBeUndefined()
+		expect(stdoutSpy).not.toHaveBeenCalled()
+		expect(stderrSpy).not.toHaveBeenCalled()
 	})
 
 	it("resolveLogFilePath uses append and perRun naming conventions", async () => {
@@ -1126,6 +1123,7 @@ describe("src/cli.ts wiring", () => {
 					path: "/tmp/test.log",
 					writeLine: () => {},
 					writeChunk: (chunk) => fileChunks.push(chunk),
+					writeEvent: () => {},
 					close: () => Promise.resolve(),
 				},
 			),
@@ -1134,7 +1132,12 @@ describe("src/cli.ts wiring", () => {
 		expect(runTests).toHaveBeenCalledWith(
 			expect.objectContaining({
 				testBin: "npx",
-				testArgs: ["vitest", "run", "--reporter=verbose"],
+				testArgs: expect.arrayContaining([
+					"vitest",
+					"run",
+					"--reporter=verbose",
+					"--reporter=json",
+				]),
 				onStdoutChunk: expect.any(Function),
 				onStderrChunk: expect.any(Function),
 			}),
@@ -1144,7 +1147,7 @@ describe("src/cli.ts wiring", () => {
 		expect(fileChunks).toEqual(["stdout chunk\n", "stderr chunk\n"])
 	})
 
-	it("runTestPhase passes interactiveSpawn in verbose mode", async () => {
+	it("runTestPhase uses inherit output mode in verbose mode", async () => {
 		const { runTests } = setupMocks({
 			runTestsImpl: () => Promise.resolve(),
 		})
@@ -1168,11 +1171,15 @@ describe("src/cli.ts wiring", () => {
 		})
 
 		expect(runTests).toHaveBeenCalledWith(
-			expect.objectContaining({ interactiveSpawn: expect.any(Function) }),
+			expect.objectContaining({
+				outputMode: "inherit",
+				testBin: "npx",
+				testArgs: ["vitest", "run", "--reporter=verbose"],
+			}),
 		)
 	})
 
-	it("createTestPhaseOutputHandlers tees raw chunks in verbose mode", async () => {
+	it("createTestPhaseOutputHandlers uses inherit mode in verbose mode", async () => {
 		setupMocks()
 		const { __test__ } = await importMain()
 		const stdoutSpy = vi
@@ -1181,8 +1188,6 @@ describe("src/cli.ts wiring", () => {
 		const stderrSpy = vi
 			.spyOn(process.stderr, "write")
 			.mockReturnValue(true as any)
-		const fileChunks: string[] = []
-
 		const handlers = __test__.createTestPhaseOutputHandlers(
 			{
 				sshConnectionString: "s",
@@ -1203,17 +1208,17 @@ describe("src/cli.ts wiring", () => {
 			{
 				path: "/tmp/test.log",
 				writeLine: () => {},
-				writeChunk: (chunk) => fileChunks.push(chunk),
+				writeChunk: () => {},
+				writeEvent: () => {},
 				close: () => Promise.resolve(),
 			},
 		)
 
-		handlers.onStdoutChunk("stdout chunk\n")
-		handlers.onStderrChunk("stderr chunk\n")
-
-		expect(stdoutSpy).toHaveBeenCalledWith("stdout chunk\n")
-		expect(stderrSpy).toHaveBeenCalledWith("stderr chunk\n")
-		expect(fileChunks).toEqual(["stdout chunk\n", "stderr chunk\n"])
+		expect(handlers.outputMode).toBe("inherit")
+		expect(handlers.onStdoutChunk).toBeUndefined()
+		expect(handlers.onStderrChunk).toBeUndefined()
+		expect(stdoutSpy).not.toHaveBeenCalled()
+		expect(stderrSpy).not.toHaveBeenCalled()
 	})
 
 	it("runBuildPhase skips build when skipBuild is true", async () => {
@@ -1273,11 +1278,11 @@ describe("src/cli.ts wiring", () => {
 
 		expect(runBuildMock).toHaveBeenCalledWith(
 			{ command: "custom-cmd", args: ["arg1", "arg2"] },
-			expect.objectContaining({ outputMode: "callbacks" }),
+			expect.objectContaining({ outputMode: "silent" }),
 		)
 	})
 
-	it("runBuildPhase passes interactiveSpawn in verbose mode", async () => {
+	it("runBuildPhase uses inherit output mode in verbose mode", async () => {
 		const runBuildMock = vi.fn().mockResolvedValue(undefined)
 		setupMocks({ runBuildImpl: runBuildMock })
 		const { __test__ } = await importMain()
@@ -1301,7 +1306,7 @@ describe("src/cli.ts wiring", () => {
 
 		expect(runBuildMock).toHaveBeenCalledWith(
 			expect.anything(),
-			expect.objectContaining({ interactiveSpawn: expect.any(Function) }),
+			expect.objectContaining({ outputMode: "inherit" }),
 		)
 	})
 
@@ -1334,7 +1339,7 @@ describe("src/cli.ts wiring", () => {
 		)
 	})
 
-	it("runSyncPhase passes interactiveSpawn in verbose mode", async () => {
+	it("runSyncPhase uses inherit output mode in verbose mode", async () => {
 		const syncMock = vi.fn().mockResolvedValue(undefined)
 		setupMocks({ syncBuildImpl: syncMock })
 		const { __test__ } = await importMain()
@@ -1357,7 +1362,7 @@ describe("src/cli.ts wiring", () => {
 		})
 
 		expect(syncMock).toHaveBeenCalledWith(
-			expect.objectContaining({ interactiveSpawn: expect.any(Function) }),
+			expect.objectContaining({ outputMode: "inherit" }),
 		)
 	})
 
@@ -1391,7 +1396,7 @@ describe("src/cli.ts wiring", () => {
 		)
 	})
 
-	it("runPm2Phase passes interactiveSpawn in verbose mode", async () => {
+	it("runPm2Phase uses inherit output mode in verbose mode", async () => {
 		const updateMock = vi.fn().mockResolvedValue({ instanceCount: 1 })
 		setupMocks({ updatePm2AppImpl: updateMock })
 		const { __test__ } = await importMain()
@@ -1414,7 +1419,7 @@ describe("src/cli.ts wiring", () => {
 		})
 
 		expect(updateMock).toHaveBeenCalledWith(
-			expect.objectContaining({ interactiveSpawn: expect.any(Function) }),
+			expect.objectContaining({ outputMode: "inherit" }),
 		)
 	})
 

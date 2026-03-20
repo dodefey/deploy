@@ -2,14 +2,14 @@
 
 ## 1. Purpose
 
-Provide a consistent, readable, intentional logging experience across the whole deploy flow—build → sync → PM2 → churn—while keeping verbosity under explicit user control.
+Provide a consistent, readable, intentional logging experience across the whole deploy flow while keeping terminal fidelity and deploy-file logging intentionally separate.
 
 This project introduces:
 
 - A unified deploy “story” shown to the user.
 - Clean, predictable logs in **non-verbose** mode.
 - Detailed, tool-native logs in **verbose** mode.
-- Future-proof structure for progress bars, warnings, file logs, etc.
+- A structured deploy record in file logging mode.
 
 This spec **does not** change deploy semantics, exit codes, or module behavior.
 
@@ -23,7 +23,7 @@ This spec **does not** change deploy semantics, exit codes, or module behavior.
 
 - Clean, minimal output.
 - Easy to read in CI or terminal.
-- No raw process output.
+- No raw process output in the terminal.
 - Consistent start/finish markers for each phase.
 
 **Behavior:**
@@ -37,13 +37,14 @@ This spec **does not** change deploy semantics, exit codes, or module behavior.
     - Churn summary
     - Churn-only start/complete lines when running churn-only
 - No direct process output.
-- If profile file logging is enabled, the deploy log still captures full child output from tests, build, sync, and PM2.
+- If profile file logging is enabled, the deploy log records phase lifecycle lines, command metadata, typed errors, and phase results.
+- Quiet mode may also capture raw child output into the deploy log because it does not distort the human terminal stream.
 - Modules use:
 
 ```ts
 outputMode: "callbacks"
-onStdoutChunk: (chunk) => { /* write to log file only, or noop if disabled */ }
-onStderrChunk: (chunk) => { /* write to log file only, or noop if disabled */ }
+onStdoutChunk: (chunk) => { /* optional quiet-mode file capture only */ }
+onStderrChunk: (chunk) => { /* optional quiet-mode file capture only */ }
 ```
 
 ---
@@ -54,21 +55,19 @@ onStderrChunk: (chunk) => { /* write to log file only, or noop if disabled */ }
 
 - Same phase lines as non-verbose.
 - Full test / build / rsync / PM2 output printed.
-- Verbose mode must use an interactive/PTY-backed transport for external commands whose direct terminal behavior depends on seeing a TTY.
+- Verbose mode must preserve direct command behavior for surfaced commands by letting those commands talk to the terminal through inherited stdio.
 - For tests, "full output" means the complete terminal-visible Vitest stream, not just final reporter summaries.
   This includes live in-place progress/status output such as:
     - incremental `Test Files` / `Tests` counters
     - per-file running/progress lines like `❯ ... 0/7`
     - queued/running transitions
     - startup lines such as `RUN ...` and other TTY-visible status output
-- In verbose mode, test output must therefore preserve TTY-style behavior closely enough that a user sees the same substantive stream they would see from running `npx vitest run` directly in that terminal.
-- The same fidelity requirement applies to build, sync, and PM2 output: verbose deploy mode must surface the same substantive terminal stream the operator would see from running the underlying command directly.
+- In verbose mode, test output must therefore preserve terminal behavior closely enough that a user sees the same substantive stream they would see from running `npx vitest run` directly in that terminal.
+- The same fidelity requirement applies to build, sync, and PM2 output for the commands intentionally surfaced to the operator.
 - Modules use:
 
 ```ts
-outputMode: "callbacks"
-onStdoutChunk: (chunk) => { /* tee to terminal, optional file */ }
-onStderrChunk: (chunk) => { /* tee to terminal, optional file */ }
+outputMode: "inherit"
 ```
 
 Profile default:
@@ -176,56 +175,56 @@ If no profile name is available (rare), the logger may omit `(profile="...")` an
 ### Build
 
 ```ts
-outputMode = "callbacks"
 if (verbose) {
-	runViaInteractiveTransportAndTeeToTerminalAndLog()
+	outputMode = "inherit" // human channel
+} else if (fileLoggingEnabled) {
+	outputMode = "callbacks" // optional quiet-mode capture
 } else {
-	onStdoutChunk = writeRawChunkToLogOrNoop
-	onStderrChunk = writeRawChunkToLogOrNoop
+	outputMode = "silent"
 }
 ```
 
 ### Sync
 
 ```ts
-outputMode = "callbacks"
 if (verbose) {
-	runViaInteractiveTransportAndTeeToTerminalAndLog()
+	outputMode = "inherit" // rsync / surfaced ssh commands talk directly to terminal
+} else if (fileLoggingEnabled) {
+	outputMode = "callbacks"
 } else {
-	onStdoutChunk = writeRawChunkToLogOrNoop
-	onStderrChunk = writeRawChunkToLogOrNoop
+	outputMode = "silent"
 }
 ```
 
 ### PM2
 
 ```ts
-outputMode = "callbacks"
 if (verbose) {
-	runViaInteractiveTransportAndTeeToTerminalAndLog()
+	outputMode = "inherit" // surfaced PM2 restart commands talk directly to terminal
+} else if (fileLoggingEnabled) {
+	outputMode = "callbacks"
 } else {
-	onStdoutChunk = writeRawChunkToLogOrNoop
-	onStderrChunk = writeRawChunkToLogOrNoop
+	outputMode = "silent"
 }
 ```
 
 ### Tests
 
 ```ts
-outputMode = "callbacks"
 if (verbose) {
-	runViaInteractiveTransportAndTeeToTerminalAndLog()
+	outputMode = "inherit"
+} else if (fileLoggingEnabled) {
+	outputMode = "callbacks"
 } else {
-	onStdoutChunk = writeRawChunkToLogOrNoop
-	onStderrChunk = writeRawChunkToLogOrNoop
+	outputMode = "silent"
 }
 ```
 
 Requirements:
 
-- In verbose mode, terminal output for tests must be byte-for-byte equivalent to running the underlying test command directly in the same terminal.
+- In verbose mode, terminal output for tests must be driven by direct child terminal execution, not by callback teeing.
 - Specifically, verbose test output must include the live Vitest progress and status stream that appears in direct terminal execution, not merely the post-run reporter summary or incidental application console output.
-- Deploy-mode tests must be invoked with a reporter that emits individual test names and outcomes.
+- Deploy-mode tests must be invoked with a reporter setup that preserves live terminal output while also producing a machine-readable test record for the deploy log.
 - If profile file logging is enabled, the test portion of the run log must show:
     - which tests were run
     - which tests passed
@@ -242,12 +241,12 @@ No outputMode; prints summary.
 ## 7. Future-Proofing
 
 - Modules must support `"callbacks"` mode.
-- Verbose orchestration for tests/build/sync/PM2 must support an interactive/PTY-backed execution path.
+- Verbose orchestration for tests/build/sync/PM2 must preserve direct terminal behavior by using inherited stdio for surfaced commands.
 - Build/sync/PM2/tests must support raw chunk forwarding in callback mode; line callbacks remain available as a compatibility fallback.
 - `main.ts` must pass valid callbacks even if no-op.
-- Console output must come only from orchestrator-managed forwarding in non-verbose mode.
-- When profile file logging is enabled, deploy logs and all child output from tests, build, sync, and PM2 are also written to the configured log file.
-- For verbose terminal output, fidelity to direct command execution is required, not approximate formatting.
+- Console output must come only from deploy logging or direct child execution, not callback-based terminal reconstruction.
+- When profile file logging is enabled, the deploy log is a separate deploy record. It must contain enough information to reconstruct what ran, what happened, and why it passed or failed.
+- For verbose terminal output, fidelity to direct command execution is required, not approximate formatting or transcript replay.
 
 ---
 

@@ -1,6 +1,5 @@
 import type { ChildProcess, SpawnOptions } from "child_process"
 import { spawn } from "child_process"
-import type { TInteractiveSpawn } from "./interactiveSpawn.js"
 
 export type TTestOutputMode = "inherit" | "silent" | "callbacks"
 
@@ -26,7 +25,6 @@ export interface TTestOptions {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
-	interactiveSpawn?: TInteractiveSpawn
 }
 
 export type TTestErrorCode =
@@ -50,7 +48,6 @@ interface TResolvedTestOptions {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
-	interactiveSpawn?: TInteractiveSpawn
 }
 
 /**
@@ -93,7 +90,6 @@ function resolveOptions(options: TTestOptions): TResolvedTestOptions {
 		onStderrLine: options.onStderrLine,
 		onStdoutChunk: options.onStdoutChunk,
 		onStderrChunk: options.onStderrChunk,
-		interactiveSpawn: options.interactiveSpawn,
 	}
 }
 
@@ -105,10 +101,6 @@ function runTestsWithSpawn(
 	options: TResolvedTestOptions,
 	spawnImpl: TSpawnLike,
 ): Promise<void> {
-	if (options.interactiveSpawn && options.outputMode === "callbacks") {
-		return runTestsInteractively(options)
-	}
-
 	const spawnOptions = buildSpawnOptions(options)
 
 	return new Promise((resolve, reject) => {
@@ -195,49 +187,6 @@ function runTestsWithSpawn(
 	})
 }
 
-async function runTestsInteractively(
-	options: TResolvedTestOptions,
-): Promise<void> {
-	const onOutput = createCombinedOutputForwarder(options)
-
-	try {
-		const result = await options.interactiveSpawn!({
-			command: options.testBin,
-			args: options.testArgs,
-			cwd: options.rootDir,
-			env: options.env,
-			onOutput,
-		})
-
-		if (result.signal) {
-			throw testError(
-				"TEST_INTERRUPTED",
-				`Test process was interrupted by signal ${result.signal}.`,
-			)
-		}
-
-		if (result.code === 0) return
-
-		throw testError(
-			"TEST_FAILED",
-			`Test process exited with code ${String(result.code)}.`,
-		)
-	} catch (err) {
-		if (err instanceof Error && typeof err.cause === "string") throw err
-		const code = (err as NodeJS.ErrnoException | undefined)?.code
-		if (code === "ENOENT") {
-			throw testError(
-				"TEST_COMMAND_NOT_FOUND",
-				`Test command "${options.testBin}" was not found in PATH.`,
-			)
-		}
-		throw testError(
-			"TEST_FAILED",
-			`Failed to start test command "${options.testBin}".`,
-		)
-	}
-}
-
 function buildSpawnOptions(options: TResolvedTestOptions): SpawnOptions {
 	const base: SpawnOptions = {
 		cwd: options.rootDir,
@@ -274,35 +223,6 @@ function wireChildOutput(
 		forwardStreamByChunk(child.stderr, options.onStderrChunk)
 	} else if (child.stderr && options.onStderrLine) {
 		forwardStreamByLine(child.stderr, options.onStderrLine)
-	}
-}
-
-function createCombinedOutputForwarder(
-	options: TResolvedTestOptions,
-): (chunk: string) => void {
-	if (options.onStdoutChunk) return options.onStdoutChunk
-	if (options.onStderrChunk) return options.onStderrChunk
-	if (options.onStdoutLine) return forwardChunksAsLines(options.onStdoutLine)
-	if (options.onStderrLine) return forwardChunksAsLines(options.onStderrLine)
-	return () => {}
-}
-
-function forwardChunksAsLines(
-	onLine: (line: string) => void,
-): (chunk: string) => void {
-	let buffer = ""
-
-	return (chunk: string) => {
-		buffer += chunk
-
-		let newlineIndex: number
-		while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-			const line = buffer.slice(0, newlineIndex).replace(/\r$/, "")
-			buffer = buffer.slice(newlineIndex + 1)
-			if (line.length > 0) {
-				onLine(line)
-			}
-		}
 	}
 }
 
