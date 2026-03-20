@@ -255,4 +255,29 @@ describe("syncBuild", () => {
 		expect(out).toEqual(["line1\nline2"])
 		expect(err).toEqual(["warn1\r\nwarn2"])
 	})
+
+	it("uses interactive spawn when provided", async () => {
+		const { syncBuild } = await importModuleWithMocks([])
+		const out: string[] = []
+		const interactiveSpawn = vi
+			.fn()
+			.mockImplementation(async ({ command, onOutput }: any) => {
+				if (command === "ssh") {
+					return { code: 0, signal: null }
+				}
+				onOutput("interactive rsync\r\n")
+				return { code: 0, signal: null }
+			})
+
+		await syncBuild({
+			sshConnectionString: "h",
+			remoteDir: "/app",
+			outputMode: "callbacks",
+			onStdoutChunk: (chunk) => out.push(chunk),
+			interactiveSpawn,
+		})
+
+		expect(interactiveSpawn).toHaveBeenCalled()
+		expect(out).toEqual(["interactive rsync\r\n"])
+	})
 })

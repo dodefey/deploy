@@ -1,6 +1,7 @@
 // See docs/specs/build-module-spec.md for the complete specification of this module.
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import * as path from "node:path"
+import type { TInteractiveSpawn } from "./interactiveSpawn.js"
 
 export type TBuildOutputMode = "inherit" | "silent" | "callbacks"
 
@@ -17,6 +18,7 @@ export interface TBuildOptions {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
+	interactiveSpawn?: TInteractiveSpawn
 }
 
 export type TBuildErrorCode =
@@ -46,10 +48,54 @@ export async function runBuild(
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
+		interactiveSpawn,
 	} = optionsWithSpawn
 
 	const cwd = path.resolve(rootDir)
 	const spawnEnv = { ...process.env, ...env }
+	if (interactiveSpawn && outputMode === "callbacks") {
+		const onOutput = createCombinedOutputForwarder({
+			onStdoutLine,
+			onStderrLine,
+			onStdoutChunk,
+			onStderrChunk,
+		})
+
+		try {
+			const result = await interactiveSpawn({
+				command: commandSpec.command,
+				args: commandSpec.args,
+				cwd,
+				env: spawnEnv,
+				onOutput,
+			})
+			if (result.code === 0) return
+			if (result.signal) {
+				throw buildError(
+					"BUILD_INTERRUPTED",
+					`Build interrupted by signal: ${result.signal}`,
+				)
+			}
+			throw buildError(
+				"BUILD_FAILED",
+				`Build failed with exit code ${String(result.code)}`,
+			)
+		} catch (err) {
+			if (err instanceof Error && typeof err.cause === "string") throw err
+			const code = (err as NodeJS.ErrnoException | undefined)?.code
+			if (code === "ENOENT") {
+				throw buildError(
+					"BUILD_COMMAND_NOT_FOUND",
+					`Build command not found: ${commandSpec.command}`,
+				)
+			}
+			throw buildError(
+				"BUILD_FAILED",
+				err instanceof Error ? err.message : String(err),
+			)
+		}
+	}
+
 	const stdio = resolveStdio(outputMode)
 	const child = createSpawn(optionsWithSpawn)(
 		commandSpec.command,
@@ -164,6 +210,28 @@ function wireOutput(
 			flushLines(stderrBuffer + "\n", listeners.onStderrLine)
 		}
 	})
+}
+
+function createCombinedOutputForwarder(listeners: {
+	onStdoutLine?: (line: string) => void
+	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
+}): (chunk: string) => void {
+	if (listeners.onStdoutChunk) return listeners.onStdoutChunk
+	if (listeners.onStderrChunk) return listeners.onStderrChunk
+	if (listeners.onStdoutLine) return createLineForwarder(listeners.onStdoutLine)
+	if (listeners.onStderrLine) return createLineForwarder(listeners.onStderrLine)
+	return () => {}
+}
+
+function createLineForwarder(onLine: (line: string) => void): (chunk: string) => void {
+	let buffer = ""
+
+	return (chunk: string) => {
+		buffer += chunk
+		buffer = flushLines(buffer, onLine)
+	}
 }
 
 function flushLines(buffer: string, cb?: (line: string) => void): string {

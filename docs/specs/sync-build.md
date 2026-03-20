@@ -68,6 +68,7 @@ export interface TSyncBuildOptions {
     - `"inherit"`: module writes rsync output to process stdout/stderr.
     - `"silent"`: nothing printed.
     - `"callbacks"`: output is delivered to provided callbacks as raw chunks when chunk callbacks are supplied, otherwise line-by-line.
+    - In deploy-verbose orchestration, surfaced ssh/rsync commands may run through an interactive/PTY-backed transport so terminal-visible output matches direct command behavior while callback forwarding still receives the raw stream.
 
 ## 4. Behavior
 

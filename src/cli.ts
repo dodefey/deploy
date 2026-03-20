@@ -35,6 +35,7 @@ import {
 import { updatePM2App } from "./pm2.js"
 import { syncBuild } from "./syncBuild.js"
 import { runTests } from "./test.js"
+import { interactiveSpawn } from "./interactiveSpawn.js"
 
 // Exit semantics:
 // - Fatal phases: configuration, tests, build, sync, churn-only (exit code 1 via handleFatalError).
@@ -290,6 +291,7 @@ async function runBuildPhase(
 				outputMode: handlers.outputMode,
 				onStdoutChunk: handlers.onStdoutChunk,
 				onStderrChunk: handlers.onStderrChunk,
+				interactiveSpawn: values.verbose ? interactiveSpawn : undefined,
 			},
 		)
 		logPhaseSuccess("Build completed successfully.")
@@ -315,6 +317,7 @@ async function runTestPhase(
 			outputMode: handlers.outputMode,
 			onStdoutChunk: handlers.onStdoutChunk,
 			onStderrChunk: handlers.onStderrChunk,
+			interactiveSpawn: values.verbose ? interactiveSpawn : undefined,
 		})
 		logPhaseSuccess("Test suite completed successfully.")
 	} catch (err) {
@@ -336,6 +339,7 @@ async function runSyncPhase(
 		outputMode: handlers.outputMode as TBuildOutputMode,
 		onStdoutChunk: handlers.onStdoutChunk,
 		onStderrChunk: handlers.onStderrChunk,
+		interactiveSpawn: values.verbose ? interactiveSpawn : undefined,
 	}
 
 	try {
@@ -367,6 +371,7 @@ async function runPm2Phase(
 			outputMode: handlers.outputMode,
 			onStdoutChunk: handlers.onStdoutChunk,
 			onStderrChunk: handlers.onStderrChunk,
+			interactiveSpawn: values.verbose ? interactiveSpawn : undefined,
 		})
 		logPm2Success({
 			appName: values.pm2AppName,

@@ -104,6 +104,8 @@ If `--churnOnly` is set:
 - Uses `runTests` with callback wiring in both quiet and verbose modes.
 - Deploy-mode test execution uses `npx vitest run --reporter=verbose` so logs enumerate individual test cases and outcomes.
 - In verbose mode, terminal output for the test phase must match exactly what the user would see if they ran the underlying test command directly in the terminal.
+- That requirement includes the live Vitest terminal stream: startup banner, incremental `Test Files` / `Tests` counters, per-file progress lines such as `❯ ... 0/7`, queued/running transitions, and other TTY-visible status output that appears during a normal direct run.
+- Verbose test execution must therefore use an interactive/PTY-backed transport rather than ordinary piped stdio forwarding.
 - Quiet mode writes raw stdout/stderr chunks to the optional log file immediately and does not replay them to the terminal.
 - If file logging is enabled, the run log must record which tests were run and the final pass/fail outcome for those tests, including failed test names and assertion details when failures occur.
 - Failure is fatal.
@@ -114,6 +116,7 @@ If `--churnOnly` is set:
 - Skips when `skipBuild` is true.
 - Uses profile-defined `buildCommand`/`buildArgs`.
 - Uses callback wiring in both quiet and verbose modes.
+- Verbose build execution must use an interactive/PTY-backed transport so the user sees the same substantive terminal stream as a direct local build command.
 - In quiet mode, child output is written only to the optional deploy log file.
 - Failure is fatal.
 
@@ -121,6 +124,7 @@ If `--churnOnly` is set:
 
 - Uses `syncBuild` with resolved paths and `dryRun`.
 - Uses callback wiring in both quiet and verbose modes.
+- Verbose sync execution must use an interactive/PTY-backed transport for surfaced ssh/rsync commands so terminal output matches direct command behavior.
 - In quiet mode, child output is written only to the optional deploy log file.
 - Failure is fatal.
 
@@ -129,6 +133,7 @@ If `--churnOnly` is set:
 - Skips remote update when `dryRun` is true.
 - Uses `updatePM2App` otherwise.
 - Uses callback wiring in both quiet and verbose modes.
+- Verbose PM2 execution must use an interactive/PTY-backed transport for surfaced ssh/PM2 commands so terminal output matches direct command behavior.
 - In quiet mode, child output is written only to the optional deploy log file.
 - `PM2_APP_NAME_NOT_FOUND` is fatal.
 - Other PM2 failures are non-fatal and logged as degraded-success.

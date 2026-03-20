@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs"
 import * as path from "node:path"
 
 import type { TBuildOutputMode } from "./build.ts"
+import type { TInteractiveSpawn } from "./interactiveSpawn.js"
 
 const DEFAULT_SSH_OPTS = [
 	"-4",
@@ -28,6 +29,7 @@ export interface TPM2Options {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
+	interactiveSpawn?: TInteractiveSpawn
 }
 
 export interface TPM2Result {
@@ -57,6 +59,7 @@ type TRunSshOptions = {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
+	interactiveSpawn?: TInteractiveSpawn
 }
 
 export async function updatePM2App(options: TPM2Options): Promise<TPM2Result> {
@@ -72,6 +75,7 @@ export async function updatePM2App(options: TPM2Options): Promise<TPM2Result> {
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
+		interactiveSpawn,
 	} = options
 
 	const sshRunOptions: TRunSshOptions = {
@@ -80,6 +84,7 @@ export async function updatePM2App(options: TPM2Options): Promise<TPM2Result> {
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
+		interactiveSpawn,
 	}
 
 	const localConfigContent = await readLocalConfig(localEcosystemPath)
@@ -483,6 +488,30 @@ function runSshCommand(
 		}
 
 		const stdio = resolveStdio(sshOptions.outputMode)
+		if (sshOptions.interactiveSpawn && sshOptions.outputMode === "callbacks") {
+			const onOutput = createCombinedOutputForwarder(sshOptions, (chunk) => {
+				stdout += chunk
+				stderr += chunk
+			})
+			sshOptions
+				.interactiveSpawn({
+					command: "ssh",
+					args: [...DEFAULT_SSH_OPTS, sshConnectionString, command],
+					cwd: process.cwd(),
+					env: process.env,
+					onOutput,
+				})
+				.then((result) => {
+					finish({ code: result.code, stdout, stderr, spawnError })
+				})
+				.catch((err) => {
+					spawnError = toMessage(err)
+					stderr += spawnError
+					finish({ code: 1, stdout, stderr, spawnError })
+				})
+			return
+		}
+
 		const child = spawn(
 			"ssh",
 			[...DEFAULT_SSH_OPTS, sshConnectionString, command],
@@ -534,6 +563,44 @@ function runSshCommand(
 			finish({ code: 1, stdout, stderr, spawnError })
 		})
 	})
+}
+
+function createCombinedOutputForwarder(
+	sshOptions: TRunSshOptions,
+	collect: (chunk: string) => void,
+): (chunk: string) => void {
+	if (sshOptions.onStdoutChunk) {
+		return (chunk: string) => {
+			sshOptions.onStdoutChunk?.(chunk)
+			collect(chunk)
+		}
+	}
+	if (sshOptions.onStderrChunk) {
+		return (chunk: string) => {
+			sshOptions.onStderrChunk?.(chunk)
+			collect(chunk)
+		}
+	}
+	if (sshOptions.onStdoutLine) {
+		return createLineCollectingForwarder(sshOptions.onStdoutLine, collect)
+	}
+	if (sshOptions.onStderrLine) {
+		return createLineCollectingForwarder(sshOptions.onStderrLine, collect)
+	}
+	return collect
+}
+
+function createLineCollectingForwarder(
+	onLine: (line: string) => void,
+	collect: (chunk: string) => void,
+): (chunk: string) => void {
+	let buffer = ""
+
+	return (chunk: string) => {
+		collect(chunk)
+		buffer += chunk
+		buffer = flushLines(buffer, onLine, () => {})
+	}
 }
 
 function resolveStdio(

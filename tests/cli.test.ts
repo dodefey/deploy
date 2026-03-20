@@ -1144,6 +1144,34 @@ describe("src/cli.ts wiring", () => {
 		expect(fileChunks).toEqual(["stdout chunk\n", "stderr chunk\n"])
 	})
 
+	it("runTestPhase passes interactiveSpawn in verbose mode", async () => {
+		const { runTests } = setupMocks({
+			runTestsImpl: () => Promise.resolve(),
+		})
+		const { __test__ } = await importMain()
+
+		await __test__.runTestPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: true,
+			churnOnly: false,
+			profileName: "p",
+		})
+
+		expect(runTests).toHaveBeenCalledWith(
+			expect.objectContaining({ interactiveSpawn: expect.any(Function) }),
+		)
+	})
+
 	it("createTestPhaseOutputHandlers tees raw chunks in verbose mode", async () => {
 		setupMocks()
 		const { __test__ } = await importMain()
@@ -1249,6 +1277,34 @@ describe("src/cli.ts wiring", () => {
 		)
 	})
 
+	it("runBuildPhase passes interactiveSpawn in verbose mode", async () => {
+		const runBuildMock = vi.fn().mockResolvedValue(undefined)
+		setupMocks({ runBuildImpl: runBuildMock })
+		const { __test__ } = await importMain()
+
+		await __test__.runBuildPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "custom-cmd",
+			buildArgs: ["arg1"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: true,
+			churnOnly: false,
+			profileName: "p",
+		})
+
+		expect(runBuildMock).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ interactiveSpawn: expect.any(Function) }),
+		)
+	})
+
 	it("runSyncPhase passes through dryRun flag", async () => {
 		const syncMock = vi.fn().mockResolvedValue(undefined)
 		setupMocks({
@@ -1275,6 +1331,33 @@ describe("src/cli.ts wiring", () => {
 
 		expect(syncMock).toHaveBeenCalledWith(
 			expect.objectContaining({ dryRun: true }),
+		)
+	})
+
+	it("runSyncPhase passes interactiveSpawn in verbose mode", async () => {
+		const syncMock = vi.fn().mockResolvedValue(undefined)
+		setupMocks({ syncBuildImpl: syncMock })
+		const { __test__ } = await importMain()
+
+		await __test__.runSyncPhase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: true,
+			churnOnly: false,
+			profileName: "p",
+		})
+
+		expect(syncMock).toHaveBeenCalledWith(
+			expect.objectContaining({ interactiveSpawn: expect.any(Function) }),
 		)
 	})
 
@@ -1305,6 +1388,33 @@ describe("src/cli.ts wiring", () => {
 		expect(updateMock).not.toHaveBeenCalled()
 		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
 			"PM2 update complete: skipped.",
+		)
+	})
+
+	it("runPm2Phase passes interactiveSpawn in verbose mode", async () => {
+		const updateMock = vi.fn().mockResolvedValue({ instanceCount: 1 })
+		setupMocks({ updatePm2AppImpl: updateMock })
+		const { __test__ } = await importMain()
+
+		await __test__.runPm2Phase({
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload",
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: true,
+			churnOnly: false,
+			profileName: "p",
+		})
+
+		expect(updateMock).toHaveBeenCalledWith(
+			expect.objectContaining({ interactiveSpawn: expect.any(Function) }),
 		)
 	})
 

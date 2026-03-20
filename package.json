@@ -1,6 +1,6 @@
 {
 	"name": "@dodefey/deploy",
-	"version": "0.2.0",
+	"version": "0.3.0-rc.4",
 	"description": "A small, gunshi-based CLI app for deploying PM2 managed projects. Configurable with different deploy profiles. Runs test, build, syncs build to server and handles PM2 start/restart",
 	"license": "MIT",
 	"engines": {
@@ -27,7 +27,8 @@
 		"semi": false
 	},
 	"dependencies": {
-		"gunshi": "^0.26.3"
+		"gunshi": "^0.26.3",
+		"node-pty": "^1.1.0"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.39.1",

@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs"
 import * as path from "node:path"
 
 import type { TBuildOutputMode } from "./build.ts"
+import type { TInteractiveSpawn } from "./interactiveSpawn.js"
 
 export interface TSyncBuildOptions {
 	sshConnectionString: string
@@ -14,6 +15,7 @@ export interface TSyncBuildOptions {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
+	interactiveSpawn?: TInteractiveSpawn
 }
 
 export type TSyncBuildErrorCode =
@@ -27,6 +29,7 @@ type TRunOptions = {
 	onStderrLine?: (line: string) => void
 	onStdoutChunk?: (chunk: string) => void
 	onStderrChunk?: (chunk: string) => void
+	interactiveSpawn?: TInteractiveSpawn
 }
 
 type TRunResult = {
@@ -47,6 +50,7 @@ export async function syncBuild(options: TSyncBuildOptions): Promise<void> {
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
+		interactiveSpawn,
 	} = options
 
 	const runOptions: TRunOptions = {
@@ -55,6 +59,7 @@ export async function syncBuild(options: TSyncBuildOptions): Promise<void> {
 		onStderrLine,
 		onStdoutChunk,
 		onStderrChunk,
+		interactiveSpawn,
 	}
 	const localDir = resolveLocalDir(localOutputDir)
 
@@ -189,6 +194,30 @@ function runCommand(
 		}
 
 		const stdio = resolveStdio(runOptions.outputMode)
+		if (runOptions.interactiveSpawn && runOptions.outputMode === "callbacks") {
+			const onOutput = createCombinedOutputForwarder(runOptions, (chunk) => {
+				stdout += chunk
+				stderr += chunk
+			})
+			runOptions.interactiveSpawn({
+				command,
+				args,
+				cwd: process.cwd(),
+				env: process.env,
+				onOutput,
+			})
+				.then((result) => {
+					finish({ code: result.code, stdout, stderr, spawnError })
+				})
+				.catch((err) => {
+					spawnError =
+						err instanceof Error ? err.message : String(err)
+					stderr += spawnError
+					finish({ code: 1, stdout, stderr, spawnError })
+				})
+			return
+		}
+
 		const child = spawn(command, args, { stdio } as SpawnOptions)
 
 		if (runOptions.outputMode === "callbacks") {
@@ -230,6 +259,44 @@ function runCommand(
 			finish({ code, stdout, stderr, spawnError })
 		})
 	})
+}
+
+function createCombinedOutputForwarder(
+	runOptions: TRunOptions,
+	collect: (chunk: string) => void,
+): (chunk: string) => void {
+	if (runOptions.onStdoutChunk) {
+		return (chunk: string) => {
+			runOptions.onStdoutChunk?.(chunk)
+			collect(chunk)
+		}
+	}
+	if (runOptions.onStderrChunk) {
+		return (chunk: string) => {
+			runOptions.onStderrChunk?.(chunk)
+			collect(chunk)
+		}
+	}
+	if (runOptions.onStdoutLine) {
+		return createLineCollectingForwarder(runOptions.onStdoutLine, collect)
+	}
+	if (runOptions.onStderrLine) {
+		return createLineCollectingForwarder(runOptions.onStderrLine, collect)
+	}
+	return collect
+}
+
+function createLineCollectingForwarder(
+	onLine: (line: string) => void,
+	collect: (chunk: string) => void,
+): (chunk: string) => void {
+	let buffer = ""
+
+	return (chunk: string) => {
+		collect(chunk)
+		buffer += chunk
+		buffer = flushLines(buffer, onLine, () => {})
+	}
 }
 
 function wireCallbacks(

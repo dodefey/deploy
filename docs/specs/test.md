@@ -175,6 +175,7 @@ No changes to success semantics: success is still “did not throw.”
 For deploy-orchestrated usage, the caller may impose stronger guarantees on top of callback mode:
 
 - In verbose mode, the terminal output shown to the user must match exactly what they would see if the test command were run directly in that terminal.
+- Deploy-verbose orchestration may therefore use an interactive/PTY-backed transport instead of ordinary piped stdio forwarding.
 - The deploy orchestrator may choose a more explicit test reporter than the generic module default so persisted logs enumerate test names and outcomes.
 - When file logging is enabled, the persisted log must show which tests ran and their outcomes, including which tests passed and which tests failed if any, with failed test names and assertion details.
 

@@ -137,7 +137,7 @@ node dist/cli.js deploy \
 
 ## Output Modes
 
-`outputMode` is one of `inherit` (legacy direct stdio), `silent`, or `callbacks` and is used by build, sync, and PM2 modules. In deploy orchestration, callback mode is used to forward raw child output to the terminal only in verbose mode and to the deploy log whenever file logging is enabled. For tests, deploy mode uses Vitest's verbose reporter so the log records individual test names and outcomes.
+`outputMode` is one of `inherit` (legacy direct stdio), `silent`, or `callbacks` and is used by build, sync, and PM2 modules. In deploy orchestration, quiet mode uses callback forwarding for log capture, while verbose mode uses an interactive PTY-backed transport so tests/build/sync/PM2 preserve the same substantive terminal stream a direct command run would show. For tests, that includes the full live Vitest terminal stream, including startup lines, incremental counters, and per-file progress lines like `❯ ... 0/7`, not just final summaries. Deploy mode also uses a Vitest reporter configuration that records individual test names and outcomes in the log.
 
 ## Error Codes (selected)
 

@@ -100,6 +100,7 @@ export type TPM2ErrorCode =
 - env defaults to `"production"`
 - restartMode defaults to `"startOrReload"`
 - Logging behavior matches build.ts
+- In deploy-verbose orchestration, surfaced ssh/PM2 commands may run through an interactive/PTY-backed transport so terminal-visible output matches direct command behavior while callback forwarding still receives the raw stream.
 - SSH transport: uses the shared deploy SSH defaults driven by `sshConnectionString` (keys/ssh_config). If a shared SSH helper is introduced, this module should consume it; no module-specific SSH config is defined here.
 
 ### 4.2 Step 1: Compare configs

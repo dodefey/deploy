@@ -388,6 +388,44 @@ describe("updatePm2App", () => {
 		expect(err).toEqual([])
 	})
 
+	it("uses interactive spawn when provided", async () => {
+		const responses: TSpawnResponse[] = []
+		const out: string[] = []
+		const interactiveSpawn = vi
+			.fn()
+			.mockImplementation(async ({ command, args, onOutput }: any) => {
+				const remoteCommand = args.at(-1) as string
+				if (command !== "ssh") {
+					throw new Error("expected ssh")
+				}
+				if (remoteCommand.includes("test -f")) return { code: 1, signal: null }
+				if (remoteCommand.includes("base64 -d")) return { code: 0, signal: null }
+				if (remoteCommand === "pm2 jlist") {
+					onOutput(JSON.stringify([{ name: "app", pm2_env: { status: "online" } }]))
+					return { code: 0, signal: null }
+				}
+				if (remoteCommand.includes("pm2 startOrReload")) {
+					onOutput("interactive pm2\r\n")
+					return { code: 0, signal: null }
+				}
+				return { code: 0, signal: null }
+			})
+
+		const { updatePM2App } = await importModuleWithMocks(responses, "local")
+		const result = await updatePM2App({
+			sshConnectionString: "host",
+			remoteDir: "/remote",
+			appName: "app",
+			outputMode: "callbacks",
+			onStdoutChunk: (chunk) => out.push(chunk),
+			interactiveSpawn,
+		})
+
+		expect(result.instanceCount).toBe(1)
+		expect(interactiveSpawn).toHaveBeenCalled()
+		expect(out.some((chunk) => chunk.includes("interactive pm2"))).toBe(true)
+	})
+
 	it("flushes buffered stdout in callbacks mode before resolving", async () => {
 		const jlist = JSON.stringify([
 			{ name: "app", pm2_env: { status: "online" } },

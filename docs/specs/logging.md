@@ -54,6 +54,15 @@ onStderrChunk: (chunk) => { /* write to log file only, or noop if disabled */ }
 
 - Same phase lines as non-verbose.
 - Full test / build / rsync / PM2 output printed.
+- Verbose mode must use an interactive/PTY-backed transport for external commands whose direct terminal behavior depends on seeing a TTY.
+- For tests, "full output" means the complete terminal-visible Vitest stream, not just final reporter summaries.
+  This includes live in-place progress/status output such as:
+    - incremental `Test Files` / `Tests` counters
+    - per-file running/progress lines like `❯ ... 0/7`
+    - queued/running transitions
+    - startup lines such as `RUN ...` and other TTY-visible status output
+- In verbose mode, test output must therefore preserve TTY-style behavior closely enough that a user sees the same substantive stream they would see from running `npx vitest run` directly in that terminal.
+- The same fidelity requirement applies to build, sync, and PM2 output: verbose deploy mode must surface the same substantive terminal stream the operator would see from running the underlying command directly.
 - Modules use:
 
 ```ts
@@ -169,8 +178,7 @@ If no profile name is available (rare), the logger may omit `(profile="...")` an
 ```ts
 outputMode = "callbacks"
 if (verbose) {
-	onStdoutChunk = teeRawChunkToTerminalAndLog
-	onStderrChunk = teeRawChunkToTerminalAndLog
+	runViaInteractiveTransportAndTeeToTerminalAndLog()
 } else {
 	onStdoutChunk = writeRawChunkToLogOrNoop
 	onStderrChunk = writeRawChunkToLogOrNoop
@@ -182,8 +190,7 @@ if (verbose) {
 ```ts
 outputMode = "callbacks"
 if (verbose) {
-	onStdoutChunk = teeRawChunkToTerminalAndLog
-	onStderrChunk = teeRawChunkToTerminalAndLog
+	runViaInteractiveTransportAndTeeToTerminalAndLog()
 } else {
 	onStdoutChunk = writeRawChunkToLogOrNoop
 	onStderrChunk = writeRawChunkToLogOrNoop
@@ -195,8 +202,7 @@ if (verbose) {
 ```ts
 outputMode = "callbacks"
 if (verbose) {
-	onStdoutChunk = teeRawChunkToTerminalAndLog
-	onStderrChunk = teeRawChunkToTerminalAndLog
+	runViaInteractiveTransportAndTeeToTerminalAndLog()
 } else {
 	onStdoutChunk = writeRawChunkToLogOrNoop
 	onStderrChunk = writeRawChunkToLogOrNoop
@@ -208,8 +214,7 @@ if (verbose) {
 ```ts
 outputMode = "callbacks"
 if (verbose) {
-	onStdoutChunk = teeRawChunkToTerminalAndLog
-	onStderrChunk = teeRawChunkToTerminalAndLog
+	runViaInteractiveTransportAndTeeToTerminalAndLog()
 } else {
 	onStdoutChunk = writeRawChunkToLogOrNoop
 	onStderrChunk = writeRawChunkToLogOrNoop
@@ -219,6 +224,7 @@ if (verbose) {
 Requirements:
 
 - In verbose mode, terminal output for tests must be byte-for-byte equivalent to running the underlying test command directly in the same terminal.
+- Specifically, verbose test output must include the live Vitest progress and status stream that appears in direct terminal execution, not merely the post-run reporter summary or incidental application console output.
 - Deploy-mode tests must be invoked with a reporter that emits individual test names and outcomes.
 - If profile file logging is enabled, the test portion of the run log must show:
     - which tests were run
@@ -236,6 +242,7 @@ No outputMode; prints summary.
 ## 7. Future-Proofing
 
 - Modules must support `"callbacks"` mode.
+- Verbose orchestration for tests/build/sync/PM2 must support an interactive/PTY-backed execution path.
 - Build/sync/PM2/tests must support raw chunk forwarding in callback mode; line callbacks remain available as a compatibility fallback.
 - `main.ts` must pass valid callbacks even if no-op.
 - Console output must come only from orchestrator-managed forwarding in non-verbose mode.
