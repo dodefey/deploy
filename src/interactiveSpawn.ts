@@ -1,4 +1,4 @@
-import { spawn as spawnPty } from "node-pty"
+import { spawn } from "node:child_process"
 
 export interface TInteractiveSpawnOptions {
 	command: string
@@ -19,44 +19,54 @@ export type TInteractiveSpawn = (
 
 export const interactiveSpawn: TInteractiveSpawn = (options) => {
 	return new Promise((resolve, reject) => {
-		let ptyProcess: ReturnType<typeof spawnPty>
+		let sanitizedPrefix = false
+		let settled = false
 
-		try {
-			ptyProcess = spawnPty(options.command, options.args, {
+		const finishReject = (err: unknown) => {
+			if (settled) return
+			settled = true
+			reject(err)
+		}
+
+		const finishResolve = (result: TInteractiveSpawnResult) => {
+			if (settled) return
+			settled = true
+			resolve(result)
+		}
+
+		const child = spawn(
+			"script",
+			["-q", "/dev/null", options.command, ...options.args],
+			{
 				cwd: options.cwd,
 				env: options.env,
-				name: process.env.TERM || "xterm-256color",
-				cols: process.stdout.columns ?? 80,
-				rows: process.stdout.rows ?? 24,
-			})
-		} catch (err) {
-			reject(err)
-			return
-		}
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		)
 
-		const handleResize = () => {
-			try {
-				ptyProcess.resize(
-					process.stdout.columns ?? 80,
-					process.stdout.rows ?? 24,
-				)
-			} catch {
-				// Resize failures are non-fatal to command execution.
-			}
-		}
-
-		process.stdout.on("resize", handleResize)
-		ptyProcess.onData((chunk) => {
-			options.onOutput(chunk)
+		child.on("error", (err) => {
+			finishReject(err)
 		})
-		ptyProcess.onExit(({ exitCode, signal }) => {
-			process.stdout.off("resize", handleResize)
-			resolve({
-				code: exitCode,
-				signal:
-					typeof signal === "number"
-						? String(signal)
-						: signal ?? null,
+
+		child.stdout?.on("data", (chunk: Buffer | string) => {
+			let text = chunk.toString("utf8")
+			if (!sanitizedPrefix) {
+				sanitizedPrefix = true
+				text = text.replace(/^(?:\^D)?\x08\x08/, "")
+			}
+			if (text.length > 0) {
+				options.onOutput(text)
+			}
+		})
+
+		child.stderr?.on("data", (chunk: Buffer | string) => {
+			options.onOutput(chunk.toString("utf8"))
+		})
+
+		child.on("close", (code, signal) => {
+			finishResolve({
+				code,
+				signal: signal ?? null,
 			})
 		})
 	})
