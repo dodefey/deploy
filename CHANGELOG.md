@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## v0.3.0 - 2026-03-20
+
+- change: verbose deploy phases now inherit child stdio directly so terminal output matches the underlying test/build/deploy tools instead of passing through a replay wrapper.
+- change: deploy log files now record structured `[deploy-record]` events for tests, builds, and deploy phases, separating machine-readable file logging from human terminal output.
+- change: test logging now captures a secondary Vitest JSON report for deploy logs while preserving the normal verbose Vitest terminal reporter.
+- change: removed the PTY/interactive spawn transport experiment and its dependency from the package.
+
 ## v0.2.0 - 2026-03-05
 
 - breaking change: churn analysis now uses a single canonical manifest/report pipeline with `${remoteDir}/.deploy/manifest.json`; legacy churn paths and `v2` naming were removed.
