@@ -7,8 +7,8 @@ The goal of Project 3 is to make the CLI exit behavior explicit, predictable, an
 We want:
 
 - Clear rules for which phases are **fatal** vs **non-fatal**.
-- A minimal number of `process.exit` calls, in well-defined places.
-- `main.ts` to behave cleanly in both success and failure cases.
+- A minimal number of direct process termination calls.
+- `main.ts` to behave cleanly in both success and failure cases while still letting pending output and log writes flush.
 
 This spec assumes the existing phase structure:
 
@@ -61,13 +61,13 @@ Any `CONFIG_*` error raised during profile normalization or resolution (includin
 
 ---
 
-## 4. `process.exit` Placement Rules
+## 4. Exit Code Placement Rules
 
-We will use the following rules for where `process.exit` is allowed.
+We will use the following rules for where exit codes are assigned.
 
 ### 4.1 Fatal exit helper
 
-There is exactly one helper responsible for structured fatal exits:
+There is exactly one helper responsible for structured fatal handling:
 
 ```ts
 function handleFatalError(label: string, err: unknown): never
@@ -79,7 +79,7 @@ function handleFatalError(label: string, err: unknown): never
     - `"<Label> error [CODE]: message"` or
     - `"<Label> error: message"`
 
-- Call `process.exit(1)`.
+- Throw a fatal sentinel error after logging.
 - Never return (`never` type).
 
 Only **fatal phases** are allowed to call `handleFatalError`:
@@ -91,21 +91,21 @@ Only **fatal phases** are allowed to call `handleFatalError`:
     - Sync phase (“Build sync” errors)
     - Churn-only mode (“Client churn” errors in churn-only mode)
 
-### 4.2 Success exits
+### 4.2 Success exit codes
 
 - The deploy command body (`deployCommand.run`) must **not** call `process.exit` directly for success.
 - On both full-deploy success and churn-only success, `deployCommand.run` must simply **return** (resolve) normally.
 
-There is exactly **one** success exit, at the bottom-level wrapper around `cli`:
+There is exactly **one** success exit assignment, at the bottom-level wrapper around `cli`:
 
-- After `cli` resolves without throwing, we call `process.exit(0)`.
+- After `cli` resolves without throwing, we set `process.exitCode = 0`.
 
 ### 4.3 Last-resort exit (unexpected errors)
 
-The top-level wrapper will catch any unexpected errors that escape `cli` and will:
+The top-level wrapper will catch any fatal or unexpected errors that escape `cli` and will:
 
-- Log a generic error (e.g. `"Unexpected deploy error:"`).
-- Exit with code `1`.
+- Set `process.exitCode = 1`.
+- Log a generic error only for unexpected errors. Fatal errors already logged by `handleFatalError` must not be logged twice.
 
 This last-resort catch does **not** replace `handleFatalError`. It only handles errors that were **not** handled by the orchestrator logic (for example, programmer errors or unexpected throws in libraries).
 
@@ -121,10 +121,10 @@ This last-resort catch does **not** replace `handleFatalError`. It only handles 
 async function main(): Promise<void> {
 	try {
 		await cli(process.argv.slice(2), deployCommand)
-		process.exit(0)
+		process.exitCode = 0
 	} catch (err) {
 		console.error("Unexpected deploy error:", err)
-		process.exit(1)
+		process.exitCode = 1
 	}
 }
 
@@ -139,12 +139,12 @@ Wrap `cli` in a small async `main` function (or an immediately invoked async fun
 async function main(): Promise<void> {
 	try {
 		await cli(process.argv.slice(2), deployCommand)
-		// If we get here, run() resolved without any fatal exit.
-		process.exit(0)
+		// If we get here, run() resolved without any fatal error.
+		process.exitCode = 0
 	} catch (err) {
-		// Last-resort: unexpected error not handled by handleFatalError
+		// Last-resort: fatal or unexpected error that escaped the orchestrator.
 		console.error("Unexpected deploy error:", err)
-		process.exit(1)
+		process.exitCode = 1
 	}
 }
 
@@ -153,9 +153,8 @@ void main()
 
 Notes:
 
-- `handleFatalError` will still call `process.exit(1)` inside the phases.
-- In those cases, `main()` will never reach its `catch` block.
-- `main()`’s `catch` is only for truly unexpected errors (not configuration/build/sync/churn-only errors that already went through `handleFatalError`).
+- `handleFatalError` throws after logging so phase-local cleanup and `finally` blocks can still run.
+- `main()` still reaches its `catch` block for fatal errors, but it must recognize them as already logged and avoid duplicating the message.
 
 ---
 
@@ -173,7 +172,7 @@ After completing:
 - **Churn-only** mode, or
 - **Full deploy** mode,
 
-`deployCommand.run` must simply return (resolve) and let the top-level `main()` decide the final `process.exit(0)`.
+`deployCommand.run` must simply return (resolve) and let the top-level `main()` decide the final exit code.
 
 ### 6.2 Keep fatal exits via `handleFatalError`
 
@@ -184,7 +183,7 @@ All current calls to `handleFatalError` inside:
 - Sync phase
 - Churn-only mode
 
-remain and are still allowed to call `process.exit(1)`.
+remain and are still allowed to throw the logged fatal sentinel.
 
 ---
 
@@ -192,7 +191,7 @@ remain and are still allowed to call `process.exit(1)`.
 
 For each phase helper (`runBuildPhase`, `runSyncPhase`, `runPm2Phase`, `runChurnPhase`, `runChurnOnlyMode`):
 
-### 7.1 No direct `process.exit`
+### 7.1 No direct process termination
 
 Phase helpers must **not** call `process.exit` directly.
 
@@ -201,9 +200,7 @@ Phase helpers must **not** call `process.exit` directly.
 If an error occurs in a fatal phase:
 
 - Call `handleFatalError("<Label>", err)`.
-- Do not rethrow.
-- Do not return a special value.
-- Let `handleFatalError` own the fatal exit.
+- Let the fatal sentinel propagate so outer cleanup can complete.
 
 ### 7.3 Non-fatal phases
 
@@ -239,23 +236,23 @@ For PM2 and churn (in full deploy mode):
 No new exit helper functions are allowed besides:
 
 - `handleFatalError`
-- The top-level `main()` `try/catch` that calls `process.exit(0/1)`.
+- The top-level `main()` `try/catch` that sets `process.exitCode`.
 
 ---
 
 ## 9. Summary of Allowed Exit Paths
 
-**Allowed `process.exit(1)` paths:**
+**Allowed exit code `1` paths:**
 
-- Inside `handleFatalError`, called from:
+- Via `handleFatalError`, called from:
     - `deployCommand.run` when handling configuration failures from `selectConfig` / `applyOverrides`
     - `runBuildPhase` (Build failures)
     - `runSyncPhase` (Sync failures)
     - `runChurnOnlyMode` (Client churn failures in churn-only mode)
 
-- Inside `main()`’s `catch` for unexpected errors not handled by the above.
+- Inside `main()`’s `catch` for fatal or unexpected errors not handled by the above.
 
-**Allowed `process.exit(0)` path:**
+**Allowed exit code `0` path:**
 
 - Inside `main()`, after `cli(...)` resolves without throwing.
 
@@ -275,8 +272,8 @@ At the top of `main.ts`, add a short comment summarizing exit semantics. For exa
 //   Failures exit with code 1 via handleFatalError.
 // - Non-fatal phases: PM2 and churn (full deploy).
 //   Failures are logged but do not change exit code (still 0 on success).
-// - Top-level main() calls process.exit(0) on success and process.exit(1)
-//   on unexpected errors.
+// - Top-level main() sets process.exitCode after command completion so
+//   pending output can flush.
 ```
 
 This comment must stay in sync with the actual behavior if exit semantics change in the future.

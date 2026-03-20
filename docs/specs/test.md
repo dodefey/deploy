@@ -50,6 +50,8 @@ export interface TTestOptions {
 	// Optional callbacks when outputMode === "callbacks"
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 export type TTestErrorCode =
@@ -142,7 +144,15 @@ This is useful when the caller wants to suppress logs but still know whether tes
 The module must also support a configuration where:
 
 - Test runner `stdout` and `stderr` are **piped** to the parent.
-- The module splits the streams into lines and invokes caller-provided callbacks:
+- The module supports two callback styles:
+
+```ts
+onStdoutChunk?: (chunk: string) => void
+onStderrChunk?: (chunk: string) => void
+```
+
+- If chunk callbacks are provided, the module forwards raw UTF-8 chunks without rewriting them.
+- Otherwise it splits the streams into lines and invokes caller-provided line callbacks:
 
 ```ts
 onStdoutLine?: (line: string) => void
@@ -152,7 +162,7 @@ onStderrLine?: (line: string) => void
 Behavior in this mode:
 
 - The module itself does **not** decide where logs go.
-- Each line is forwarded to the callback.
+- Each raw chunk or line is forwarded to the callback.
 - The caller may:
     - Write lines to a log file,
     - Echo them to the console,

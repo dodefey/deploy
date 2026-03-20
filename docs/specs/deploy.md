@@ -102,7 +102,8 @@ If `--churnOnly` is set:
 - Logs phase start.
 - Skips when `skipTests` is true.
 - Uses `runTests` with callback wiring in both quiet and verbose modes.
-- Quiet mode uses no-op callbacks; verbose mode tees child output to terminal and optional log file.
+- Verbose mode forwards raw stdout/stderr chunks to the terminal and optional log file so Vitest output stays close to native formatting.
+- Quiet mode buffers raw stdout/stderr chunks, writes them to the optional log file immediately, and replays them to the terminal only if the test phase fails.
 - Failure is fatal.
 
 ### 5.2 Build
@@ -154,7 +155,7 @@ If `--churnOnly` is set:
 - churn summary (`logChurnSummary`)
 - fatal and non-fatal error logs
 
-If profile file logging is enabled, the same deploy logs are also written to the run log file. Verbose child output is likewise teed to that file.
+If profile file logging is enabled, the same deploy logs are also written to the run log file. Verbose child output is likewise teed to that file, and failed quiet-mode test output is still written before the process exits.
 
 ---
 
@@ -162,7 +163,7 @@ If profile file logging is enabled, the same deploy logs are also written to the
 
 - Fatal phases (config/tests/build/sync/churn-only) exit with code `1`.
 - Non-fatal phases (PM2/churn in full deploy) do not change successful exit code.
-- `main()` exits `0` on successful command completion and `1` on unexpected top-level errors.
+- `main()` sets exit code `0` on successful command completion and `1` on fatal or unexpected top-level errors after pending output/log streams have had a chance to flush.
 
 See `docs/specs/exit-semantics.md` for full rules.
 

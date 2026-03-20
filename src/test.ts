@@ -23,6 +23,8 @@ export interface TTestOptions {
 	// Optional callbacks when outputMode === "callbacks"
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 export type TTestErrorCode =
@@ -44,6 +46,8 @@ interface TResolvedTestOptions {
 	outputMode: TTestOutputMode
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+	onStdoutChunk?: (chunk: string) => void
+	onStderrChunk?: (chunk: string) => void
 }
 
 /**
@@ -84,6 +88,8 @@ function resolveOptions(options: TTestOptions): TResolvedTestOptions {
 		outputMode,
 		onStdoutLine: options.onStdoutLine,
 		onStderrLine: options.onStderrLine,
+		onStdoutChunk: options.onStdoutChunk,
+		onStderrChunk: options.onStderrChunk,
 	}
 }
 
@@ -207,13 +213,26 @@ function wireChildOutput(
 		return
 	}
 
-	if (child.stdout && options.onStdoutLine) {
+	if (child.stdout && options.onStdoutChunk) {
+		forwardStreamByChunk(child.stdout, options.onStdoutChunk)
+	} else if (child.stdout && options.onStdoutLine) {
 		forwardStreamByLine(child.stdout, options.onStdoutLine)
 	}
 
-	if (child.stderr && options.onStderrLine) {
+	if (child.stderr && options.onStderrChunk) {
+		forwardStreamByChunk(child.stderr, options.onStderrChunk)
+	} else if (child.stderr && options.onStderrLine) {
 		forwardStreamByLine(child.stderr, options.onStderrLine)
 	}
+}
+
+function forwardStreamByChunk(
+	stream: NodeJS.ReadableStream,
+	onChunk: (chunk: string) => void,
+): void {
+	stream.on("data", (chunk: Buffer | string) => {
+		onChunk(chunk.toString("utf8"))
+	})
 }
 
 function forwardStreamByLine(

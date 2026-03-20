@@ -37,16 +37,18 @@ import { syncBuild } from "./syncBuild.js"
 import { runTests } from "./test.js"
 
 // Exit semantics:
-// - Fatal phases: configuration, tests, build, sync, churn-only (exit 1 via handleFatalError).
+// - Fatal phases: configuration, tests, build, sync, churn-only (exit code 1 via handleFatalError).
 // - Non-fatal phases: PM2 and churn (full deploy) log errors; exit code stays 0 if fatal phases succeed.
-// - main() calls process.exit(0) on success; process.exit(1) on unexpected errors.
+// - main() sets process.exitCode after command completion so pending output can flush.
 
 const noop = (): void => {}
 let lastProfileUsed: string | undefined
 const DEFAULT_CHURN_HISTORY_OUT = ".deploy/churn-history.jsonl"
+const FATAL_DEPLOY_ERROR = Symbol("FATAL_DEPLOY_ERROR")
 
 interface TRunLogWriter {
 	writeLine(line: string): void
+	writeChunk(chunk: string): void
 	close(): Promise<void>
 	path: string
 }
@@ -55,6 +57,13 @@ interface TPhaseOutputHandlers {
 	outputMode: TBuildOutputMode | "callbacks"
 	onStdoutLine?: (line: string) => void
 	onStderrLine?: (line: string) => void
+}
+
+interface TTestPhaseOutputHandlers {
+	outputMode: "callbacks"
+	onStdoutChunk: (chunk: string) => void
+	onStderrChunk: (chunk: string) => void
+	flushBufferedTerminalOutput(): void
 }
 
 interface TDeployArgs {
@@ -303,15 +312,16 @@ async function runTestPhase(
 		logPhaseSuccess("Test suite skipped (per --skipTests / -T).")
 		return
 	}
-	const handlers = createPhaseOutputHandlers(values, logWriter)
+	const handlers = createTestPhaseOutputHandlers(values, logWriter)
 	try {
 		await runTests({
 			outputMode: handlers.outputMode,
-			onStdoutLine: handlers.onStdoutLine,
-			onStderrLine: handlers.onStderrLine,
+			onStdoutChunk: handlers.onStdoutChunk,
+			onStderrChunk: handlers.onStderrChunk,
 		})
 		logPhaseSuccess("Test suite completed successfully.")
 	} catch (err) {
+		handlers.flushBufferedTerminalOutput()
 		handleFatalError("Tests", err, values.profileName)
 	}
 }
@@ -764,6 +774,61 @@ function createTerminalAndFileLineWriter(
 	}
 }
 
+function createTerminalAndFileChunkWriter(
+	stream: NodeJS.WriteStream,
+	logWriter?: TRunLogWriter,
+): (chunk: string) => void {
+	return (chunk: string) => {
+		stream.write(chunk)
+		logWriter?.writeChunk(chunk)
+	}
+}
+
+function createTestPhaseOutputHandlers(
+	values: TDeployArgs,
+	logWriter?: TRunLogWriter,
+): TTestPhaseOutputHandlers {
+	if (values.verbose) {
+		return {
+			outputMode: "callbacks",
+			onStdoutChunk: createTerminalAndFileChunkWriter(
+				process.stdout,
+				logWriter,
+			),
+			onStderrChunk: createTerminalAndFileChunkWriter(
+				process.stderr,
+				logWriter,
+			),
+			flushBufferedTerminalOutput: noop,
+		}
+	}
+
+	const stdoutChunks: string[] = []
+	const stderrChunks: string[] = []
+
+	return {
+		outputMode: "callbacks",
+		onStdoutChunk: (chunk) => {
+			stdoutChunks.push(chunk)
+			logWriter?.writeChunk(chunk)
+		},
+		onStderrChunk: (chunk) => {
+			stderrChunks.push(chunk)
+			logWriter?.writeChunk(chunk)
+		},
+		flushBufferedTerminalOutput: () => {
+			for (const chunk of stdoutChunks) {
+				process.stdout.write(chunk)
+			}
+			for (const chunk of stderrChunks) {
+				process.stderr.write(chunk)
+			}
+			stdoutChunks.length = 0
+			stderrChunks.length = 0
+		},
+	}
+}
+
 async function createRunLogWriter(deploy: TDeployArgs): Promise<TRunLogWriter> {
 	const outputPath = resolveLogFilePath(deploy)
 	await fs.mkdir(path.dirname(outputPath), { recursive: true })
@@ -833,6 +898,9 @@ function createStreamLogWriter(
 		writeLine: (line) => {
 			stream.write(line + "\n")
 		},
+		writeChunk: (chunk) => {
+			stream.write(chunk)
+		},
 		close: async () => {
 			if (stream.closed || stream.destroyed) return
 			await new Promise<void>((resolve, reject) => {
@@ -868,7 +936,20 @@ function handleFatalError(
 	profileName?: string,
 ): never {
 	logFatalError(label, err, { profileName })
-	process.exit(1)
+	throw fatalDeployError(err)
+}
+
+function fatalDeployError(cause: unknown): Error {
+	const err = cause instanceof Error ? cause : new Error(toErrorMessage(cause))
+	Object.defineProperty(err, FATAL_DEPLOY_ERROR, {
+		value: true,
+		enumerable: false,
+	})
+	return err
+}
+
+function isFatalDeployError(err: unknown): boolean {
+	return err instanceof Error && FATAL_DEPLOY_ERROR in err
 }
 
 // Important: JUST call cli with args + command.
@@ -876,10 +957,12 @@ function handleFatalError(
 async function main(): Promise<void> {
 	try {
 		await cli(process.argv.slice(2), deployCommand)
-		process.exit(0)
+		process.exitCode = 0
 	} catch (err) {
-		logUnexpectedError(err, { profileName: lastProfileUsed })
-		process.exit(1)
+		if (!isFatalDeployError(err)) {
+			logUnexpectedError(err, { profileName: lastProfileUsed })
+		}
+		process.exitCode = 1
 	}
 }
 
@@ -901,6 +984,8 @@ export const __test__: Record<string, unknown> = {
 	runTestPhase,
 	deployCommand,
 	handleFatalError,
+	createTestPhaseOutputHandlers,
+	isFatalDeployError,
 	createPhaseOutputHandlers,
 	resolveLogFilePath,
 	formatRunTimestamp,

@@ -107,6 +107,7 @@ Churn output notes:
 - If omitted, history defaults to `.deploy/churn-history.jsonl`.
 - Profile `logging.console.verboseDefault` may enable verbose output by default when `--verbose` is not passed.
 - Profile `logging.file` writes deploy logs and surfaced child output to `deploy.log` (`append`) or `deploy-<profile>-<timestamp>.log` (`perRun`) under the configured directory.
+- Failed test output is always written to the deploy log before the CLI exits; in quiet mode it is replayed to the terminal only on failure.
 
 Example:
 
@@ -136,7 +137,7 @@ node dist/cli.js deploy \
 
 ## Output Modes
 
-`outputMode` is one of `inherit` (legacy direct stdio), `silent`, or `callbacks` (line handlers) and is used by build, sync, and PM2 modules. The deploy orchestrator now uses callback routing so surfaced output can be teed to the terminal and the optional deploy log file.
+`outputMode` is one of `inherit` (legacy direct stdio), `silent`, or `callbacks` and is used by build, sync, and PM2 modules. For tests, the deploy orchestrator uses raw chunk forwarding in callback mode so Vitest failure details can be teed to the terminal and deploy log with minimal formatting loss.
 
 ## Error Codes (selected)
 

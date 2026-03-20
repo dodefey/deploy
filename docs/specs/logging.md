@@ -166,9 +166,11 @@ If no profile name is available (rare), the logger may omit `(profile="...")` an
 ### Build
 
 ```ts
-if (verbose) outputMode = "inherit"
-else {
-	outputMode = "callbacks"
+outputMode = "callbacks"
+if (verbose) {
+	onStdoutLine = teeToTerminalAndLog
+	onStderrLine = teeToTerminalAndLog
+} else {
 	onStdoutLine = noop
 	onStderrLine = noop
 }
@@ -177,9 +179,11 @@ else {
 ### Sync
 
 ```ts
-if (verbose) outputMode = "inherit"
-else {
-	outputMode = "callbacks"
+outputMode = "callbacks"
+if (verbose) {
+	onStdoutLine = teeToTerminalAndLog
+	onStderrLine = teeToTerminalAndLog
+} else {
 	onStdoutLine = noop
 	onStderrLine = noop
 }
@@ -188,11 +192,27 @@ else {
 ### PM2
 
 ```ts
-if (verbose) outputMode = "inherit"
-else {
-	outputMode = "callbacks"
+outputMode = "callbacks"
+if (verbose) {
+	onStdoutLine = teeToTerminalAndLog
+	onStderrLine = teeToTerminalAndLog
+} else {
 	onStdoutLine = noop
 	onStderrLine = noop
+}
+```
+
+### Tests
+
+```ts
+outputMode = "callbacks"
+if (verbose) {
+	onStdoutChunk = teeRawChunkToTerminalAndLog
+	onStderrChunk = teeRawChunkToTerminalAndLog
+} else {
+	onStdoutChunk = bufferAndWriteToLog
+	onStderrChunk = bufferAndWriteToLog
+	// replay to terminal only if tests fail
 }
 ```
 
@@ -206,7 +226,7 @@ No outputMode; prints summary.
 
 - Modules must support `"callbacks"` mode.
 - `main.ts` must pass valid callbacks even if no-op.
-- Console output must come only from orchestrator (`console.log`) in non-verbose mode.
+- Console output must come only from orchestrator-managed forwarding in non-verbose mode, except for replaying buffered failed test output.
 - When profile file logging is enabled, deploy logs and any surfaced child output are also written to the configured log file.
 
 ---

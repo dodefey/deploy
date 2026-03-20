@@ -503,6 +503,7 @@ describe("src/cli.ts wiring", () => {
 			{
 				path: "/tmp/test.log",
 				writeLine: (line) => lines.push(line),
+				writeChunk: (chunk) => lines.push(chunk),
 				close: () => Promise.resolve(),
 			},
 		)
@@ -695,12 +696,8 @@ describe("src/cli.ts wiring", () => {
 			updatePm2AppImpl: () => Promise.reject(fatalError),
 		})
 		const { __test__ } = await importMain()
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-			// @ts-expect-error allow returning undefined for tests
-			() => undefined,
-		)
-
-		await __test__.runPm2Phase({
+		await expect(
+			__test__.runPm2Phase({
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
@@ -715,14 +712,14 @@ describe("src/cli.ts wiring", () => {
 			verbose: false,
 			churnOnly: false,
 			profileName: "p",
-		})
+			}),
+		).rejects.toBe(fatalError)
 
 		expect(logFns.logFatalError).toHaveBeenCalledWith(
 			"PM2 update",
 			fatalError,
 			{ profileName: "p" },
 		)
-		expect(exitSpy).toHaveBeenCalledWith(1)
 	})
 
 	it("runPm2Phase logs non-fatal PM2 errors and continues", async () => {
@@ -744,11 +741,6 @@ describe("src/cli.ts wiring", () => {
 			updatePm2AppImpl: () => Promise.reject(err),
 		})
 		const { __test__ } = await importMain()
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-			// @ts-expect-error
-			() => undefined,
-		)
-
 		await __test__.runPm2Phase({
 			sshConnectionString: "s",
 			remoteDir: "/r",
@@ -773,14 +765,10 @@ describe("src/cli.ts wiring", () => {
 				profileName: "p",
 			},
 		)
-		expect(exitSpy).not.toHaveBeenCalled()
 	})
 
-	it("main exits 0 on success", async () => {
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-			// @ts-expect-error
-			() => undefined,
-		)
+	it("main sets exitCode 0 on success", async () => {
+		process.exitCode = undefined
 		const { logFns } = setupMocks({
 			listProfilesReturn: ["test"],
 			resolveProfileImpl: () => ({
@@ -798,24 +786,41 @@ describe("src/cli.ts wiring", () => {
 		const { __test__ } = await importMain()
 		await __test__.main()
 
-		expect(exitSpy).toHaveBeenCalledWith(0)
+		expect(process.exitCode).toBe(0)
 		expect(logFns.logUnexpectedError).not.toHaveBeenCalled()
 	})
 
-	it("main logs unexpected error and exits 1", async () => {
+	it("main logs unexpected error and sets exitCode 1", async () => {
 		const err = new Error("boom")
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-			// @ts-expect-error
-			() => undefined,
-		)
+		process.exitCode = undefined
 		const { logFns } = setupMocks({
 			gunshiCliImpl: () => Promise.reject(err),
 		})
 		const { __test__ } = await importMain()
 
 		await __test__.main()
-		expect(exitSpy).toHaveBeenCalledWith(1)
+		expect(process.exitCode).toBe(1)
 		expect(logFns.logUnexpectedError).toHaveBeenCalled()
+	})
+
+	it("main does not double-log fatal errors that were already handled", async () => {
+		process.exitCode = undefined
+		const fatalError = new Error("fatal")
+		let handledFatalError: Error | undefined
+		const { logFns } = setupMocks({
+			gunshiCliImpl: () => Promise.reject(handledFatalError),
+		})
+		const imported = await importMain()
+		try {
+			imported.__test__.handleFatalError("Tests", fatalError, "p")
+		} catch (err) {
+			handledFatalError = err as Error
+		}
+
+		await imported.__test__.main()
+
+		expect(process.exitCode).toBe(1)
+		expect(logFns.logUnexpectedError).not.toHaveBeenCalled()
 	})
 
 	it("deployCommand.run calls churn-only path when churnOnly is true", async () => {
@@ -918,10 +923,6 @@ describe("src/cli.ts wiring", () => {
 	})
 
 	it("deployCommand.run treats log file setup failure as fatal configuration error", async () => {
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-			// @ts-expect-error
-			() => undefined,
-		)
 		const { logFns } = setupMocks({
 			listProfilesReturn: ["p"],
 			resolveProfileImpl: () => ({
@@ -948,23 +949,24 @@ describe("src/cli.ts wiring", () => {
 		})
 		const { __test__ } = await importMain()
 
-		await (__test__.deployCommand as any).run({
-			values: {
-				profile: "p",
-				churnOnly: false,
-				dryRun: false,
-				skipTests: false,
-				skipBuild: false,
-				verbose: false,
-			},
-		} as any)
+		await expect(
+			(__test__.deployCommand as any).run({
+				values: {
+					profile: "p",
+					churnOnly: false,
+					dryRun: false,
+					skipTests: false,
+					skipBuild: false,
+					verbose: false,
+				},
+			} as any),
+		).rejects.toBeInstanceOf(Error)
 
 		expect(logFns.logFatalError).toHaveBeenCalledWith(
 			"Configuration",
 			expect.any(Error),
 			{ profileName: "p" },
 		)
-		expect(exitSpy).toHaveBeenCalledWith(1)
 	})
 
 	it("runTestPhase skips when skipTests is true", async () => {
@@ -1002,12 +1004,9 @@ describe("src/cli.ts wiring", () => {
 			runTestsImpl: () => Promise.reject(testError),
 		})
 		const { __test__ } = await importMain()
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-			// @ts-expect-error allow returning undefined for tests
-			() => undefined,
-		)
 
-		await __test__.runTestPhase({
+		await expect(
+			__test__.runTestPhase({
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
@@ -1022,12 +1021,112 @@ describe("src/cli.ts wiring", () => {
 			verbose: false,
 			churnOnly: false,
 			profileName: "p",
-		})
+			}),
+		).rejects.toBe(testError)
 
 		expect(logFns.logFatalError).toHaveBeenCalledWith("Tests", testError, {
 			profileName: "p",
 		})
-		expect(exitSpy).toHaveBeenCalledWith(1)
+	})
+
+	it("runTestPhase replays buffered failed test output to terminal when not verbose", async () => {
+		const { runTests } = setupMocks({
+			runTestsImpl: ({ onStdoutChunk, onStderrChunk }: any) => {
+				onStdoutChunk?.("stdout chunk\n")
+				onStderrChunk?.("stderr chunk\n")
+				return Promise.reject(new Error("tests failed"))
+			},
+		})
+		const { __test__ } = await importMain()
+		const stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockReturnValue(true as any)
+		const stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockReturnValue(true as any)
+		const fileChunks: string[] = []
+
+		await expect(
+			__test__.runTestPhase(
+				{
+					sshConnectionString: "s",
+					remoteDir: "/r",
+					buildDir: "/b",
+					buildCommand: "npx",
+					buildArgs: ["nuxt", "build"],
+					env: "prod",
+					pm2AppName: "app",
+					pm2RestartMode: "startOrReload",
+					dryRun: false,
+					skipTests: false,
+					skipBuild: false,
+					verbose: false,
+					churnOnly: false,
+					profileName: "p",
+				},
+				{
+					path: "/tmp/test.log",
+					writeLine: () => {},
+					writeChunk: (chunk) => fileChunks.push(chunk),
+					close: () => Promise.resolve(),
+				},
+			),
+		).rejects.toBeInstanceOf(Error)
+
+		expect(runTests).toHaveBeenCalledWith(
+			expect.objectContaining({
+				onStdoutChunk: expect.any(Function),
+				onStderrChunk: expect.any(Function),
+			}),
+		)
+		expect(stdoutSpy).toHaveBeenCalledWith("stdout chunk\n")
+		expect(stderrSpy).toHaveBeenCalledWith("stderr chunk\n")
+		expect(fileChunks).toEqual(["stdout chunk\n", "stderr chunk\n"])
+	})
+
+	it("createTestPhaseOutputHandlers tees raw chunks in verbose mode", async () => {
+		setupMocks()
+		const { __test__ } = await importMain()
+		const stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockReturnValue(true as any)
+		const stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockReturnValue(true as any)
+		const fileChunks: string[] = []
+
+		const handlers = __test__.createTestPhaseOutputHandlers(
+			{
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload",
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: true,
+				churnOnly: false,
+				profileName: "p",
+			},
+			{
+				path: "/tmp/test.log",
+				writeLine: () => {},
+				writeChunk: (chunk) => fileChunks.push(chunk),
+				close: () => Promise.resolve(),
+			},
+		)
+
+		handlers.onStdoutChunk("stdout chunk\n")
+		handlers.onStderrChunk("stderr chunk\n")
+		handlers.flushBufferedTerminalOutput()
+
+		expect(stdoutSpy).toHaveBeenCalledWith("stdout chunk\n")
+		expect(stderrSpy).toHaveBeenCalledWith("stderr chunk\n")
+		expect(fileChunks).toEqual(["stdout chunk\n", "stderr chunk\n"])
 	})
 
 	it("runBuildPhase skips build when skipBuild is true", async () => {
@@ -1301,12 +1400,8 @@ describe("src/cli.ts wiring", () => {
 			computeClientChurnReportImpl: computeMock,
 		})
 		const { __test__ } = await importMain()
-		const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-			// @ts-expect-error
-			() => undefined,
-		)
-
-		await __test__.runChurnOnlyMode({
+		await expect(
+			__test__.runChurnOnlyMode({
 			sshConnectionString: "s",
 			remoteDir: "/r",
 			buildDir: "/b",
@@ -1321,14 +1416,14 @@ describe("src/cli.ts wiring", () => {
 			verbose: false,
 			churnOnly: true,
 			profileName: "p",
-		})
+			}),
+		).rejects.toBe(churnError)
 
 		expect(logFns.logFatalError).toHaveBeenCalledWith(
 			"Client churn",
 			churnError,
 			{ profileName: "p" },
 		)
-		expect(exitSpy).toHaveBeenCalledWith(1)
 	})
 
 	it("runChurnPhase uses report path and diagnostics formatter when enabled", async () => {

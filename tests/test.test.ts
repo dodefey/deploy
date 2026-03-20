@@ -225,6 +225,35 @@ describe("runTests", () => {
 		expect(stdoutLines).toEqual(["only-stdout"])
 	})
 
+	it("callbacks mode can forward raw chunks without line splitting", async () => {
+		const child = new FakeChildProcess()
+		child.stdout = new PassThrough()
+		child.stderr = new PassThrough()
+		spawnMock.mockReturnValue(child as any)
+
+		const stdoutChunks: string[] = []
+		const stderrChunks: string[] = []
+
+		const run = runTests({
+			outputMode: "callbacks",
+			onStdoutChunk: (chunk) => stdoutChunks.push(chunk),
+			onStderrChunk: (chunk) => stderrChunks.push(chunk),
+		})
+
+		queueMicrotask(() => {
+			child.stdout?.write("hello\nworld")
+			child.stdout?.end()
+			child.stderr?.write("err1\nerr2")
+			child.stderr?.end()
+			child.emit("exit", 0, null)
+			child.emit("close")
+		})
+
+		await expect(run).resolves.toBeUndefined()
+		expect(stdoutChunks).toEqual(["hello\nworld"])
+		expect(stderrChunks).toEqual(["err1\nerr2"])
+	})
+
 	it("callbacks mode works with no callbacks provided", async () => {
 		const child = new FakeChildProcess()
 		child.stdout = new PassThrough()
