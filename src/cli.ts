@@ -1065,7 +1065,7 @@ function writePhaseErrorEvent(
 }
 
 function createDeployVitestArgs(reportPath?: string): string[] {
-	const args = ["vitest", "run", "--reporter=verbose"]
+	const args = ["vitest", "run", "--reporter=default"]
 	if (reportPath) {
 		args.push("--reporter=json", `--outputFile.json=${reportPath}`)
 	}

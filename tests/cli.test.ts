@@ -1079,7 +1079,7 @@ describe("src/cli.ts wiring", () => {
 		expect(runTests).toHaveBeenCalledWith(
 			expect.objectContaining({
 				testBin: "npx",
-				testArgs: ["vitest", "run", "--reporter=verbose"],
+				testArgs: ["vitest", "run", "--reporter=default"],
 			}),
 		)
 	})
@@ -1135,7 +1135,7 @@ describe("src/cli.ts wiring", () => {
 				testArgs: expect.arrayContaining([
 					"vitest",
 					"run",
-					"--reporter=verbose",
+					"--reporter=default",
 					"--reporter=json",
 				]),
 				onStdoutChunk: expect.any(Function),
@@ -1174,7 +1174,7 @@ describe("src/cli.ts wiring", () => {
 			expect.objectContaining({
 				outputMode: "inherit",
 				testBin: "npx",
-				testArgs: ["vitest", "run", "--reporter=verbose"],
+				testArgs: ["vitest", "run", "--reporter=default"],
 			}),
 		)
 	})

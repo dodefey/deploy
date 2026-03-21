@@ -102,7 +102,7 @@ If `--churnOnly` is set:
 - Logs phase start.
 - Skips when `skipTests` is true.
 - Uses `runTests` with inherited stdio in verbose mode and callback capture only in quiet mode when file logging is enabled.
-- Deploy-mode test execution uses `npx vitest run --reporter=verbose`, and when file logging is enabled it also enables a JSON reporter artifact so the deploy log can enumerate individual test cases and outcomes.
+- Deploy-mode test execution uses `npx vitest run --reporter=default`, and when file logging is enabled it also enables a JSON reporter artifact so the deploy log can enumerate individual test cases and outcomes.
 - In verbose mode, terminal output for the test phase must match exactly what the user would see if they ran the underlying test command directly in the terminal.
 - That requirement includes the live Vitest terminal stream: startup banner, incremental `Test Files` / `Tests` counters, per-file progress lines such as `❯ ... 0/7`, queued/running transitions, and other TTY-visible status output that appears during a normal direct run.
 - Verbose test execution must preserve direct terminal behavior by letting the test command own the terminal through inherited stdio.

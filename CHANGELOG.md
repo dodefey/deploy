@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## v0.3.1-rc1 - 2026-03-21
+
+- fix: deploy-mode test runs now use Vitest's `default` reporter instead of `verbose` so real task-terminal failures keep their final failure details visible.
+- chore: remove the temporary Vitest reporter reproduction scripts and fixtures used during the terminal-output investigation.
+
 ## v0.3.0 - 2026-03-20
 
 - change: verbose deploy phases now inherit child stdio directly so terminal output matches the underlying test/build/deploy tools instead of passing through a replay wrapper.
