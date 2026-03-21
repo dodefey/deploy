@@ -106,6 +106,7 @@ If `--churnOnly` is set:
 - In verbose mode, terminal output for the test phase must match exactly what the user would see if they ran the underlying test command directly in the terminal.
 - That requirement includes the live Vitest terminal stream: startup banner, incremental `Test Files` / `Tests` counters, per-file progress lines such as `❯ ... 0/7`, queued/running transitions, and other TTY-visible status output that appears during a normal direct run.
 - Verbose test execution must preserve direct terminal behavior by letting the test command own the terminal through inherited stdio.
+- Known issue: some real task/integrated-terminal environments still lose Vitest's final failed-test detail block even when deploy preserves inherited stdio and the child exits with code `1`. We reproduced this on March 21, 2026 in a Nuxt app using Vitest `v4.1.0`; swapping deploy-mode tests from `--reporter=verbose` to `--reporter=default` did not fix the real-project behavior, so the JSON reporter artifact remains the only deploy-controlled failure record known to be reliable across environments.
 - Quiet mode may write raw stdout/stderr chunks to the optional log file and does not replay them to the terminal.
 - If file logging is enabled, the run log must record which tests were run and the final pass/fail outcome for those tests, including failed test names and assertion details when failures occur.
 - Failure is fatal.

@@ -154,6 +154,7 @@ node dist/cli.js deploy \
 - **PM2 app missing**: check `pm2AppName` matches the ecosystem config on the server.
 - **rsync errors**: verify SSH connectivity and remote write permissions to `${remoteDir}/.output`.
 - **Churn baseline missing**: first deploy will create `${remoteDir}/.deploy/manifest.json`; subsequent runs compare against it.
+- **Vitest exits with code `1`, but the terminal never shows the final failed-test details**: this is a known issue in some real task/integrated-terminal environments. We reproduced it in a Nuxt app using `deploy -p production -n` with Vitest `v4.1.0`: the terminal showed live progress, then deploy logged `Tests error [TEST_FAILED] ... exited with code 1` without the final Vitest failure block. We also tested a deploy-only reporter swap from `--reporter=verbose` to `--reporter=default`, and the real project still dropped the final failure detail block. If this needs investigation again, start from the real project/task environment rather than the local deploy repo repros, and assume the JSON reporter artifact is the only fully reliable source of failed test details that deploy controls today.
 
 ## License
 
