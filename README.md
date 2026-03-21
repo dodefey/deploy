@@ -124,7 +124,7 @@ node dist/cli.js deploy \
 ## Deploy Pipeline (what happens)
 
 1. **Config**: Load profile, apply CLI overrides, validate restart mode.
-2. **Tests**: `npx vitest run --reporter=default` unless `--skipTests`. When file logging is enabled, deploy also adds a JSON Vitest reporter artifact so the deploy log can enumerate test cases and outcomes without stealing the live terminal stream.
+2. **Tests**: `npx vitest run --reporter=verbose` unless `--skipTests`. When file logging is enabled, deploy also adds a JSON Vitest reporter artifact so the deploy log can enumerate test cases and outcomes without stealing the live terminal stream.
 3. **Build**: Run the profile-defined build command (via `runBuild`); verbose mode gives the child process direct terminal control.
 4. **Sync**: `rsync` local `.output` to `${remoteDir}/.output` (or override), honors `--dryRun`.
 5. **PM2**: `pm2 startOrReload` (or `reboot`) app in `remoteDir`; reports instance count.
@@ -138,7 +138,7 @@ node dist/cli.js deploy \
 
 ## Output Modes
 
-`outputMode` is one of `inherit`, `silent`, or `callbacks` and is used by build, sync, PM2, and tests. In deploy orchestration, verbose mode restores direct human-facing execution with `inherit`, so surfaced commands behave like a normal terminal run. For tests, deploy uses Vitest's `default` reporter because it has been more reliable than `verbose` in real deploy-task terminals while still preserving the underlying terminal stream. File logging is a separate channel owned by the orchestrator: it records lifecycle lines, command metadata, typed errors, phase summaries, and for tests a machine-readable Vitest report with individual test names and outcomes. Quiet mode may still use callback capture for raw child output because there is no operator-facing terminal stream to preserve.
+`outputMode` is one of `inherit`, `silent`, or `callbacks` and is used by build, sync, PM2, and tests. In deploy orchestration, verbose mode restores direct human-facing execution with `inherit`, so surfaced commands behave like a normal terminal run. File logging is a separate channel owned by the orchestrator: it records lifecycle lines, command metadata, typed errors, phase summaries, and for tests a machine-readable Vitest report with individual test names and outcomes. Quiet mode may still use callback capture for raw child output because there is no operator-facing terminal stream to preserve.
 
 ## Error Codes (selected)
 
