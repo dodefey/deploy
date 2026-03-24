@@ -7,6 +7,7 @@ A small gunshi-based CLI that deploys a **profile-defined build** managed by PM2
 - Single command deploy pipeline: tests → build → rsync sync → PM2 restart → churn report.
 - Profile-driven config (`profiles.json`) with per-environment SSH, paths, build command/args, PM2 app name, and restart mode.
 - Optional profile logging defaults for console verbosity and deploy log files.
+- Optional generic deploy event publishing via HTTP webhooks.
 - Typed error codes across build, sync, PM2, config, and churn for predictable handling.
 - Flexible output modes (`inherit`, `silent`, `callbacks`) for build/rsync/PM2 stages.
 - Dry-run mode: run build + churn and perform an rsync `--dry-run`; skip PM2 restart and make no remote writes.
@@ -59,6 +60,21 @@ Profiles live in your project root (`./profiles.json`). The CLI looks in the cur
 				"mode": "perRun" // optional: append|perRun (default perRun)
 			}
 		},
+		"events": {
+			"sinks": [
+				{
+					"type": "http-webhook",
+					"url": "http://127.0.0.1:4000/hooks/deploy",
+					"on": ["deploy.completed", "deploy.failed", "deploy.degraded"],
+					"timeoutMs": 3000,
+					"retries": 1,
+					"fatal": false,
+					"headers": {
+						"x-deploy-source": "deploy"
+					}
+				}
+			]
+		},
 		"churn": {
 			"diagnosticsDefault": "compact", // optional: off|compact|full|json (default off)
 			"topN": 5, // optional positive integer (default 5)
@@ -75,6 +91,7 @@ Validation rules:
 - Duplicate names → `CONFIG_DUPLICATE_PROFILE`.
 - Empty required fields (including buildCommand/buildArgs) → `CONFIG_PROFILE_INVALID`.
 - Invalid logging fields or modes → `CONFIG_PROFILE_INVALID`.
+- Invalid event sink fields or event types → `CONFIG_PROFILE_INVALID`.
 - Invalid restart mode → `CONFIG_INVALID_RESTART_MODE`.
 
 ## CLI Usage
@@ -108,6 +125,9 @@ Churn output notes:
 - Profile `logging.console.verboseDefault` may enable verbose output by default when `--verbose` is not passed.
 - Profile `logging.file` writes deploy logs to `deploy.log` (`append`) or `deploy-<profile>-<timestamp>.log` (`perRun`) under the configured directory.
 - The deploy log is a separate deploy record: it always includes deploy/phase lifecycle lines, command metadata, typed errors, and phase results. Tests also add a machine-readable Vitest summary with individual test names and outcomes.
+- Profile `events.sinks` may publish terminal deploy events to generic HTTP webhook consumers. In v1, supported event types are `deploy.completed`, `deploy.failed`, and `deploy.degraded`.
+- Webhook delivery is generic rather than `server-monitor`-specific: the POST body is the deploy event payload itself.
+- Webhook delivery is non-fatal by default; set `fatal: true` only when the webhook must be part of deploy success criteria.
 - Quiet mode keeps the terminal phase-oriented; when file logging is enabled, quiet mode may also capture raw child output into the deploy log because there is no competing human terminal stream.
 
 Example:

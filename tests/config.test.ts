@@ -138,6 +138,9 @@ describe("config module", () => {
 				mode: "perRun",
 			},
 		})
+		expect(resolved.events).toEqual({
+			sinks: [],
+		})
 	})
 
 	it("resolves optional logging config with validated values", () => {
@@ -230,6 +233,141 @@ describe("config module", () => {
 					file: {
 						dir: "   ",
 					},
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
+	})
+
+	it("resolves optional event sink config with validated values", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				events: {
+					sinks: [
+						{
+							type: "http-webhook",
+							url: "http://127.0.0.1:4000/hooks/deploy",
+							on: ["deploy.completed", "deploy.failed"],
+							timeoutMs: 1500,
+							retries: 2,
+							fatal: true,
+							headers: {
+								authorization: "Bearer token",
+							},
+						},
+					],
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+
+		const resolved = resolveProfile("prod")
+		expect(resolved.events).toEqual({
+			sinks: [
+				{
+					type: "http-webhook",
+					url: "http://127.0.0.1:4000/hooks/deploy",
+					on: ["deploy.completed", "deploy.failed"],
+					timeoutMs: 1500,
+					retries: 2,
+					fatal: true,
+					headers: {
+						authorization: "Bearer token",
+					},
+				},
+			],
+		})
+	})
+
+	it("defaults event sink selection and delivery settings", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				events: {
+					sinks: [
+						{
+							type: "http-webhook",
+							url: "http://127.0.0.1:4000/hooks/deploy",
+						},
+					],
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+
+		const resolved = resolveProfile("prod")
+		expect(resolved.events).toEqual({
+			sinks: [
+				{
+					type: "http-webhook",
+					url: "http://127.0.0.1:4000/hooks/deploy",
+					on: [
+						"deploy.completed",
+						"deploy.failed",
+						"deploy.degraded",
+					],
+					timeoutMs: 3000,
+					retries: 1,
+					fatal: false,
+					headers: {},
+				},
+			],
+		})
+	})
+
+	it("throws CONFIG_PROFILE_INVALID for malformed events config", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				events: "bad" as unknown as TProfile["events"],
+			},
+		]
+		__setProfilesForTest(profiles)
+		expectCause(() => resolveProfile("prod"), "CONFIG_PROFILE_INVALID")
+	})
+
+	it("throws CONFIG_PROFILE_INVALID for invalid event types", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				events: {
+					sinks: [
+						{
+							type: "http-webhook",
+							url: "http://127.0.0.1:4000/hooks/deploy",
+							on: [
+								"deploy.completed",
+								// @ts-expect-error intentional invalid value for validation test
+								"deploy.started",
+							],
+						},
+					],
 				},
 			},
 		]

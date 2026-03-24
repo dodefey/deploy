@@ -35,6 +35,25 @@ export interface TProfileLoggingConfig {
 	file?: TProfileLoggingFileConfig
 }
 
+export type TDeployEventType =
+	| "deploy.completed"
+	| "deploy.failed"
+	| "deploy.degraded"
+
+export interface TProfileHttpWebhookEventSinkConfig {
+	type: "http-webhook"
+	url: string
+	on?: TDeployEventType[]
+	timeoutMs?: number
+	retries?: number
+	fatal?: boolean
+	headers?: Record<string, string>
+}
+
+export interface TProfileEventsConfig {
+	sinks?: TProfileHttpWebhookEventSinkConfig[]
+}
+
 export interface TResolvedLoggingConfig {
 	console: {
 		verboseDefault: boolean
@@ -44,6 +63,20 @@ export interface TResolvedLoggingConfig {
 		dir: string
 		mode: "append" | "perRun"
 	}
+}
+
+export interface TResolvedHttpWebhookEventSinkConfig {
+	type: "http-webhook"
+	url: string
+	on: TDeployEventType[]
+	timeoutMs: number
+	retries: number
+	fatal: boolean
+	headers: Record<string, string>
+}
+
+export interface TResolvedEventsConfig {
+	sinks: TResolvedHttpWebhookEventSinkConfig[]
 }
 
 export interface TProfile {
@@ -59,6 +92,7 @@ export interface TProfile {
 	buildArgs?: string[]
 	churn?: TProfileChurnConfig
 	logging?: TProfileLoggingConfig
+	events?: TProfileEventsConfig
 }
 
 export type TProfileName = TProfile["name"]
@@ -75,6 +109,7 @@ export interface TResolvedConfig {
 	buildArgs: string[]
 	churn: TResolvedChurnConfig
 	logging: TResolvedLoggingConfig
+	events: TResolvedEventsConfig
 }
 
 export type TConfigErrorCode =
@@ -107,6 +142,13 @@ const DEFAULT_CHURN_DIAGNOSTICS_MODE: TChurnDiagnosticsDefault = "off"
 const DEFAULT_CHURN_TOP_N = 5
 const DEFAULT_LOG_FILE_DIR = ".deploy/logs"
 const DEFAULT_LOG_FILE_MODE = "perRun" as const
+const DEFAULT_EVENT_TYPES: TDeployEventType[] = [
+	"deploy.completed",
+	"deploy.failed",
+	"deploy.degraded",
+]
+const DEFAULT_EVENT_TIMEOUT_MS = 3000
+const DEFAULT_EVENT_RETRIES = 1
 
 let profilesLoader = loadProfilesFromDisk
 
@@ -139,6 +181,7 @@ export function resolveProfile(name: TProfileName): TResolvedConfig {
 	const buildArgs = validateBuildArgs(profile.buildArgs)
 	const churn = validateChurnConfig(profile.churn)
 	const logging = validateLoggingConfig(profile.logging)
+	const events = validateEventsConfig(profile.events)
 
 	return {
 		name: profile.name,
@@ -152,6 +195,7 @@ export function resolveProfile(name: TProfileName): TResolvedConfig {
 		buildArgs,
 		churn,
 		logging,
+		events,
 	}
 }
 
@@ -407,6 +451,181 @@ function validateLogFileMode(value: unknown): "append" | "perRun" {
 	)
 }
 
+function validateEventsConfig(value: unknown): TResolvedEventsConfig {
+	if (value === undefined) {
+		return { sinks: [] }
+	}
+
+	if (!isRecord(value)) {
+		throw configError("CONFIG_PROFILE_INVALID", "events must be an object")
+	}
+
+	const sinks =
+		value.sinks === undefined ? [] : validateEventSinks(value.sinks)
+
+	return { sinks }
+}
+
+function validateEventSinks(
+	value: unknown,
+): TResolvedHttpWebhookEventSinkConfig[] {
+	if (!Array.isArray(value)) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			"events.sinks must be an array",
+		)
+	}
+
+	return value.map((sink, index) => validateEventSink(sink, index))
+}
+
+function validateEventSink(
+	value: unknown,
+	index: number,
+): TResolvedHttpWebhookEventSinkConfig {
+	if (!isRecord(value)) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`events.sinks[${String(index)}] must be an object`,
+		)
+	}
+
+	if (value.type !== "http-webhook") {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`events.sinks[${String(index)}].type must be "http-webhook"`,
+		)
+	}
+
+	const on =
+		value.on === undefined
+			? [...DEFAULT_EVENT_TYPES]
+			: validateEventTypeList(value.on, `events.sinks[${String(index)}].on`)
+
+	const timeoutMs =
+		value.timeoutMs === undefined
+			? DEFAULT_EVENT_TIMEOUT_MS
+			: validatePositiveInteger(
+					value.timeoutMs,
+					`events.sinks[${String(index)}].timeoutMs`,
+				)
+	const retries =
+		value.retries === undefined
+			? DEFAULT_EVENT_RETRIES
+			: validateNonNegativeInteger(
+					value.retries,
+					`events.sinks[${String(index)}].retries`,
+				)
+
+	if (value.fatal !== undefined && typeof value.fatal !== "boolean") {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`events.sinks[${String(index)}].fatal must be a boolean`,
+		)
+	}
+
+	return {
+		type: "http-webhook",
+		url: requireString(
+			value.url,
+			"CONFIG_PROFILE_INVALID",
+			`events.sinks[${String(index)}].url`,
+		),
+		on,
+		timeoutMs,
+		retries,
+		fatal: value.fatal ?? false,
+		headers: validateStringRecord(
+			value.headers,
+			`events.sinks[${String(index)}].headers`,
+		),
+	}
+}
+
+function validateEventTypeList(
+	value: unknown,
+	fieldName: string,
+): TDeployEventType[] {
+	if (!Array.isArray(value)) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`${fieldName} must be an array`,
+		)
+	}
+
+	const normalized = value.map((item, index) =>
+		validateEventType(item, `${fieldName}[${String(index)}]`),
+	)
+	if (normalized.length === 0) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`${fieldName} must not be empty`,
+		)
+	}
+	return normalized
+}
+
+function validateEventType(
+	value: unknown,
+	fieldName: string,
+): TDeployEventType {
+	if (typeof value !== "string") {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`${fieldName} must be one of: deploy.completed, deploy.failed, deploy.degraded`,
+		)
+	}
+
+	const trimmed = value.trim()
+	if (
+		trimmed === "deploy.completed" ||
+		trimmed === "deploy.failed" ||
+		trimmed === "deploy.degraded"
+	) {
+		return trimmed
+	}
+
+	throw configError(
+		"CONFIG_PROFILE_INVALID",
+		`Invalid deploy event type: ${value}`,
+	)
+}
+
+function validateStringRecord(
+	value: unknown,
+	fieldName: string,
+): Record<string, string> {
+	if (value === undefined) {
+		return {}
+	}
+	if (!isRecord(value)) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`${fieldName} must be an object`,
+		)
+	}
+
+	const result: Record<string, string> = {}
+	for (const [key, rawValue] of Object.entries(value)) {
+		const trimmedKey = key.trim()
+		if (trimmedKey.length === 0) {
+			throw configError(
+				"CONFIG_PROFILE_INVALID",
+				`${fieldName} must not contain empty keys`,
+			)
+		}
+		if (typeof rawValue !== "string") {
+			throw configError(
+				"CONFIG_PROFILE_INVALID",
+				`${fieldName}.${trimmedKey} must be a string`,
+			)
+		}
+		result[trimmedKey] = rawValue
+	}
+
+	return result
+}
+
 function validateDiagnosticsDefault(value: unknown): TChurnDiagnosticsDefault {
 	if (typeof value !== "string") {
 		throw configError(
@@ -434,6 +653,16 @@ function validatePositiveInteger(value: unknown, fieldName: string): number {
 		throw configError(
 			"CONFIG_PROFILE_INVALID",
 			`${fieldName} must be a positive integer`,
+		)
+	}
+	return value
+}
+
+function validateNonNegativeInteger(value: unknown, fieldName: string): number {
+	if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`${fieldName} must be a non-negative integer`,
 		)
 	}
 	return value

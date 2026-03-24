@@ -54,6 +54,7 @@ Resolved values are normalized into `TDeployArgs`, including:
 - Connection/build/runtime values.
 - Runtime flags.
 - Resolved profile logging config.
+- Resolved profile event sink config.
 - Churn diagnostics options (`churnDiagnostics`, `churnTopN`, `churnReportOut`, `churnHistoryOut`).
 
 ### 3.3 Churn defaults
@@ -92,6 +93,16 @@ If `--churnOnly` is set:
 
 - Skip test/build/sync/PM2 phases.
 - Run `runChurnOnlyMode`.
+
+### 4.3 Terminal deploy events
+
+`src/cli.ts` also emits terminal deploy lifecycle events through the generic publisher in `src/deployEvents.ts`.
+
+- `deploy.completed` when a full deploy or churn-only run completes without non-fatal degradation.
+- `deploy.degraded` when the deploy completes but PM2 or full-deploy churn encountered a non-fatal error.
+- `deploy.failed` when a fatal deploy phase fails after config resolution has succeeded.
+
+These events are separate from human-facing logging and are delivered only to configured sinks.
 
 ---
 
@@ -154,6 +165,14 @@ If `--churnOnly` is set:
 - Full deploy churn failures are non-fatal.
 - Churn-only failures are fatal.
 
+### 5.7 Event delivery
+
+- Event publishing is configured from profile `events.sinks`.
+- In v1, the only sink type is `http-webhook`.
+- In v1, only terminal deploy events are emitted.
+- Webhook payloads use the generic deploy event shape rather than a consumer-specific marker payload.
+- Webhook delivery failures are non-fatal by default and become fatal only when the sink sets `fatal: true`.
+
 ---
 
 ## 6. Logging Contract
@@ -167,6 +186,8 @@ If `--churnOnly` is set:
 - fatal and non-fatal error logs
 
 If profile file logging is enabled, the same deploy logs are also written to the run log file. That file is a separate deploy record: it must contain lifecycle lines, command metadata, typed errors, phase results, and enough phase-specific detail to reconstruct what happened. For the test phase, the log must contain the observed test execution details and outcomes: which tests ran, which passed, and which failed if any, including failure details before the process exits.
+
+Deploy event publishing is a separate concern from logging. Human-facing logs remain owned by `src/deployLogging.ts`; event sinks consume structured terminal-state events for external systems.
 
 ---
 

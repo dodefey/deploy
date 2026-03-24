@@ -75,6 +75,18 @@ export interface TProfile {
 			mode?: "append" | "perRun"
 		}
 	}
+
+	events?: {
+		sinks?: Array<{
+			type: "http-webhook"
+			url: string
+			on?: Array<"deploy.completed" | "deploy.failed" | "deploy.degraded">
+			timeoutMs?: number
+			retries?: number
+			fatal?: boolean
+			headers?: Record<string, string>
+		}>
+	}
 }
 ```
 
@@ -114,6 +126,17 @@ export interface TResolvedConfig {
 			dir: string
 			mode: "append" | "perRun"
 		}
+	}
+	events: {
+		sinks: Array<{
+			type: "http-webhook"
+			url: string
+			on: Array<"deploy.completed" | "deploy.failed" | "deploy.degraded">
+			timeoutMs: number
+			retries: number
+			fatal: boolean
+			headers: Record<string, string>
+		}>
 	}
 }
 ```
@@ -195,6 +218,12 @@ Steps:
     - `logging.file.enabled = profile.logging?.file?.enabled ?? false`
     - `logging.file.dir = profile.logging?.file?.dir ?? ".deploy/logs"`
     - `logging.file.mode = profile.logging?.file?.mode ?? "perRun"`
+    - `events.sinks = profile.events?.sinks ?? []`
+    - `events.sinks[*].on = profile.events?.sinks[*].on ?? ["deploy.completed", "deploy.failed", "deploy.degraded"]`
+    - `events.sinks[*].timeoutMs = profile.events?.sinks[*].timeoutMs ?? 3000`
+    - `events.sinks[*].retries = profile.events?.sinks[*].retries ?? 1`
+    - `events.sinks[*].fatal = profile.events?.sinks[*].fatal ?? false`
+    - `events.sinks[*].headers = profile.events?.sinks[*].headers ?? {}`
 3. Validate required fields:
     - Required strings: `sshConnectionString`, `remoteDir`, `env`, `pm2AppName` → non-empty after trimming, else `CONFIG_PROFILE_INVALID`.
     - Build command: `buildCommand` must be a non-empty string; missing/whitespace → `CONFIG_PROFILE_INVALID`.
@@ -206,6 +235,14 @@ Steps:
     - `logging.file.enabled`, if provided, must be a boolean.
     - `logging.file.dir`, if provided, must be a non-empty string.
     - `logging.file.mode`, if provided, must be `append` or `perRun`.
+    - `events.sinks`, if provided, must be an array.
+    - `events.sinks[*].type` must be `http-webhook`.
+    - `events.sinks[*].url` must be a non-empty string.
+    - `events.sinks[*].on`, if provided, must be a non-empty array of supported terminal event types.
+    - `events.sinks[*].timeoutMs`, if provided, must be a positive integer.
+    - `events.sinks[*].retries`, if provided, must be a non-negative integer.
+    - `events.sinks[*].fatal`, if provided, must be a boolean.
+    - `events.sinks[*].headers`, if provided, must be an object with non-empty string keys and string values.
     - Profile names must be unique; enforce uniqueness once at load time.
     - Optional string fields, if provided, must be non-empty after trimming; otherwise defaults apply.
 4. Return resolved config including `buildCommand` and `buildArgs`.
@@ -225,6 +262,7 @@ return {
 	buildArgs: profile.buildArgs,
 	churn,
 	logging,
+	events,
 }
 ```
 
@@ -248,6 +286,7 @@ function configError(code: TConfigErrorCode, message: string): Error {
 - Missing/invalid buildCommand or buildArgs → `CONFIG_PROFILE_INVALID`
 - Invalid `churn` shape/values → `CONFIG_PROFILE_INVALID`
 - Invalid `logging` shape/values → `CONFIG_PROFILE_INVALID`
+- Invalid `events` shape/values → `CONFIG_PROFILE_INVALID`
 - Invalid pm2RestartMode → `CONFIG_INVALID_RESTART_MODE`
 
 ## 7. Interaction with src/cli.ts

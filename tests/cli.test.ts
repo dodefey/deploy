@@ -81,6 +81,7 @@ function buildReportFixture() {
 }
 
 function setupMocks(config: MockConfig = {}) {
+	const publishDeployEvent = vi.fn().mockResolvedValue(undefined)
 	const logFns = {
 		createCompositeLoggerSink: vi.fn((sinks) => ({
 			info: (line: string) => sinks.forEach((sink: any) => sink.info(line)),
@@ -124,6 +125,9 @@ function setupMocks(config: MockConfig = {}) {
 	vi.doMock("./../src/config.ts", () => ({
 		listProfiles,
 		resolveProfile,
+	}))
+	vi.doMock("./../src/deployEvents.ts", () => ({
+		publishDeployEvent,
 	}))
 	vi.doMock("./../src/build.ts", () => ({
 		runBuild: vi
@@ -174,7 +178,7 @@ function setupMocks(config: MockConfig = {}) {
 			),
 	}))
 
-	return { logFns, listProfiles, resolveProfile, runTests }
+	return { logFns, listProfiles, resolveProfile, runTests, publishDeployEvent }
 }
 
 async function importMain() {
@@ -921,7 +925,7 @@ describe("src/cli.ts wiring", () => {
 
 	it("deployCommand.run executes phases in order for full deploy", async () => {
 		const phaseOrder: string[] = []
-		setupMocks({
+		const { publishDeployEvent } = setupMocks({
 			listProfilesReturn: ["p"],
 			resolveProfileImpl: () => ({
 				name: "p",
@@ -969,6 +973,100 @@ describe("src/cli.ts wiring", () => {
 		} as any)
 
 		expect(phaseOrder).toEqual(["tests", "build", "sync", "pm2", "churn"])
+		expect(publishDeployEvent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "deploy.completed",
+				profileName: "p",
+				status: "completed",
+			}),
+			expect.anything(),
+		)
+	})
+
+	it("deployCommand.run emits deploy.degraded when a non-fatal phase fails", async () => {
+		const { publishDeployEvent } = setupMocks({
+			listProfilesReturn: ["p"],
+			resolveProfileImpl: () => ({
+				name: "p",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload" as const,
+				events: {
+					sinks: [],
+				},
+			}),
+			updatePm2AppImpl: () => Promise.reject(new Error("pm2 degraded")),
+		})
+		const { __test__ } = await importMain()
+
+		await (__test__.deployCommand as any).run({
+			values: {
+				profile: "p",
+				churnOnly: false,
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: false,
+			},
+		} as any)
+
+		expect(publishDeployEvent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "deploy.degraded",
+				profileName: "p",
+				status: "degraded",
+			}),
+			expect.anything(),
+		)
+	})
+
+	it("deployCommand.run emits deploy.failed when a fatal phase fails", async () => {
+		const { publishDeployEvent } = setupMocks({
+			listProfilesReturn: ["p"],
+			resolveProfileImpl: () => ({
+				name: "p",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload" as const,
+				events: {
+					sinks: [],
+				},
+			}),
+			runBuildImpl: () => Promise.reject(new Error("build boom")),
+		})
+		const { __test__ } = await importMain()
+
+		await expect(
+			(__test__.deployCommand as any).run({
+				values: {
+					profile: "p",
+					churnOnly: false,
+					dryRun: false,
+					skipTests: false,
+					skipBuild: false,
+					verbose: false,
+				},
+			} as any),
+		).rejects.toBeInstanceOf(Error)
+
+		expect(publishDeployEvent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "deploy.failed",
+				profileName: "p",
+				status: "failed",
+			}),
+			expect.anything(),
+		)
 	})
 
 	it("deployCommand.run treats log file setup failure as fatal configuration error", async () => {
