@@ -251,6 +251,8 @@ describe("config module", () => {
 				buildCommand: "npx",
 				buildArgs: ["nuxt", "build"],
 				events: {
+					gitSha: "abc1234",
+					releaseVersion: "v1.2.3",
 					sinks: [
 						{
 							type: "http-webhook",
@@ -271,6 +273,8 @@ describe("config module", () => {
 
 		const resolved = resolveProfile("prod")
 		expect(resolved.events).toEqual({
+			gitSha: "abc1234",
+			releaseVersion: "v1.2.3",
 			sinks: [
 				{
 					type: "http-webhook",
@@ -326,6 +330,32 @@ describe("config module", () => {
 					headers: {},
 				},
 			],
+		})
+	})
+
+	it("trims optional event metadata strings", () => {
+		const profiles: TProfile[] = [
+			{
+				name: "prod",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				env: "e",
+				pm2AppName: "app",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				events: {
+					gitSha: "  abc1234  ",
+					releaseVersion: "  v1.2.3  ",
+				},
+			},
+		]
+		__setProfilesForTest(profiles)
+
+		const resolved = resolveProfile("prod")
+		expect(resolved.events).toEqual({
+			gitSha: "abc1234",
+			releaseVersion: "v1.2.3",
+			sinks: [],
 		})
 	})
 

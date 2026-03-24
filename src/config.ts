@@ -51,6 +51,8 @@ export interface TProfileHttpWebhookEventSinkConfig {
 }
 
 export interface TProfileEventsConfig {
+	gitSha?: string
+	releaseVersion?: string
 	sinks?: TProfileHttpWebhookEventSinkConfig[]
 }
 
@@ -76,6 +78,8 @@ export interface TResolvedHttpWebhookEventSinkConfig {
 }
 
 export interface TResolvedEventsConfig {
+	gitSha?: string
+	releaseVersion?: string
 	sinks: TResolvedHttpWebhookEventSinkConfig[]
 }
 
@@ -463,7 +467,14 @@ function validateEventsConfig(value: unknown): TResolvedEventsConfig {
 	const sinks =
 		value.sinks === undefined ? [] : validateEventSinks(value.sinks)
 
-	return { sinks }
+	return {
+		gitSha: validateOptionalStringField(value.gitSha, "events.gitSha"),
+		releaseVersion: validateOptionalStringField(
+			value.releaseVersion,
+			"events.releaseVersion",
+		),
+		sinks,
+	}
 }
 
 function validateEventSinks(
@@ -624,6 +635,31 @@ function validateStringRecord(
 	}
 
 	return result
+}
+
+function validateOptionalStringField(
+	value: unknown,
+	fieldName: string,
+): string | undefined {
+	if (value === undefined) {
+		return undefined
+	}
+	if (typeof value !== "string") {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`${fieldName} must be a string`,
+		)
+	}
+
+	const trimmed = value.trim()
+	if (trimmed.length === 0) {
+		throw configError(
+			"CONFIG_PROFILE_INVALID",
+			`${fieldName} must not be empty`,
+		)
+	}
+
+	return trimmed
 }
 
 function validateDiagnosticsDefault(value: unknown): TChurnDiagnosticsDefault {

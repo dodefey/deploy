@@ -61,6 +61,8 @@ Profiles live in your project root (`./profiles.json`). The CLI looks in the cur
 			}
 		},
 		"events": {
+			"gitSha": "abc1234", // optional; included in webhook event payloads when set
+			"releaseVersion": "v1.2.3", // optional; included in webhook event payloads when set
 			"sinks": [
 				{
 					"type": "http-webhook",
@@ -127,6 +129,8 @@ Churn output notes:
 - The deploy log is a separate deploy record: it always includes deploy/phase lifecycle lines, command metadata, typed errors, and phase results. Tests also add a machine-readable Vitest summary with individual test names and outcomes.
 - Profile `events.sinks` may publish terminal deploy events to generic HTTP webhook consumers. In v1, supported event types are `deploy.completed`, `deploy.failed`, and `deploy.degraded`.
 - Webhook delivery is generic rather than `server-monitor`-specific: the POST body is the deploy event payload itself.
+- Profile `events.gitSha` and `events.releaseVersion`, when set, are included in that payload so consumers such as `server-monitor` can attach richer deploy markers.
+- If those profile fields are omitted, deploy falls back to generic runtime env vars: `DEPLOY_GIT_SHA` and `DEPLOY_RELEASE_VERSION`.
 - Webhook delivery is non-fatal by default; set `fatal: true` only when the webhook must be part of deploy success criteria.
 - Quiet mode keeps the terminal phase-oriented; when file logging is enabled, quiet mode may also capture raw child output into the deploy log because there is no competing human terminal stream.
 

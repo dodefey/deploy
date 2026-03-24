@@ -8,6 +8,8 @@ export interface TDeployEvent {
 	type: TDeployEventType
 	timestamp: string
 	deployId: string
+	gitSha?: string
+	releaseVersion?: string
 	profileName: string
 	status: "completed" | "failed" | "degraded"
 	message: string

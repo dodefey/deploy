@@ -218,6 +218,8 @@ Steps:
     - `logging.file.enabled = profile.logging?.file?.enabled ?? false`
     - `logging.file.dir = profile.logging?.file?.dir ?? ".deploy/logs"`
     - `logging.file.mode = profile.logging?.file?.mode ?? "perRun"`
+    - `events.gitSha = trim(profile.events?.gitSha) || undefined`
+    - `events.releaseVersion = trim(profile.events?.releaseVersion) || undefined`
     - `events.sinks = profile.events?.sinks ?? []`
     - `events.sinks[*].on = profile.events?.sinks[*].on ?? ["deploy.completed", "deploy.failed", "deploy.degraded"]`
     - `events.sinks[*].timeoutMs = profile.events?.sinks[*].timeoutMs ?? 3000`
@@ -236,6 +238,8 @@ Steps:
     - `logging.file.dir`, if provided, must be a non-empty string.
     - `logging.file.mode`, if provided, must be `append` or `perRun`.
     - `events.sinks`, if provided, must be an array.
+    - `events.gitSha`, if provided, must be a non-empty string after trimming.
+    - `events.releaseVersion`, if provided, must be a non-empty string after trimming.
     - `events.sinks[*].type` must be `http-webhook`.
     - `events.sinks[*].url` must be a non-empty string.
     - `events.sinks[*].on`, if provided, must be a non-empty array of supported terminal event types.

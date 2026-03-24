@@ -192,6 +192,7 @@ describe("src/cli.ts wiring", () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks()
+		vi.unstubAllEnvs()
 	})
 
 	it("selectConfig throws when no profiles", async () => {
@@ -447,6 +448,78 @@ describe("src/cli.ts wiring", () => {
 
 		expect(args.verbose).toBe(true)
 		expect(args.logging).toEqual(cfg.logging)
+	})
+
+	it("buildDeployArgs resolves event metadata from env when profile omits it", async () => {
+		setupMocks()
+		vi.stubEnv("DEPLOY_GIT_SHA", "abc1234")
+		vi.stubEnv("DEPLOY_RELEASE_VERSION", "v1.2.3")
+		const { __test__ } = await importMain()
+		const cfg = {
+			name: "p",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload" as const,
+			events: {
+				sinks: [],
+			},
+		}
+
+		const args = __test__.buildDeployArgs(cfg, {
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+		})
+
+		expect(args.events).toEqual({
+			gitSha: "abc1234",
+			releaseVersion: "v1.2.3",
+			sinks: [],
+		})
+	})
+
+	it("buildDeployArgs prefers profile event metadata over env values", async () => {
+		setupMocks()
+		vi.stubEnv("DEPLOY_GIT_SHA", "env-sha")
+		vi.stubEnv("DEPLOY_RELEASE_VERSION", "env-release")
+		const { __test__ } = await importMain()
+		const cfg = {
+			name: "p",
+			sshConnectionString: "s",
+			remoteDir: "/r",
+			buildDir: "/b",
+			buildCommand: "npx",
+			buildArgs: ["nuxt", "build"],
+			env: "prod",
+			pm2AppName: "app",
+			pm2RestartMode: "startOrReload" as const,
+			events: {
+				gitSha: "profile-sha",
+				releaseVersion: "profile-release",
+				sinks: [],
+			},
+		}
+
+		const args = __test__.buildDeployArgs(cfg, {
+			dryRun: false,
+			skipTests: false,
+			skipBuild: false,
+			verbose: false,
+			churnOnly: false,
+		})
+
+		expect(args.events).toEqual({
+			gitSha: "profile-sha",
+			releaseVersion: "profile-release",
+			sinks: [],
+		})
 	})
 
 	it("createPhaseOutputHandlers suppresses child output when quiet and file logging is disabled", async () => {
@@ -745,6 +818,11 @@ describe("src/cli.ts wiring", () => {
 				env: "prod",
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
+				events: {
+					gitSha: "abc1234",
+					releaseVersion: "v1.2.3",
+					sinks: [],
+				},
 			}),
 			updatePm2AppImpl: () => Promise.reject(fatalError),
 		})
@@ -790,6 +868,11 @@ describe("src/cli.ts wiring", () => {
 				env: "prod",
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
+				events: {
+					gitSha: "abc1234",
+					releaseVersion: "v1.2.3",
+					sinks: [],
+				},
 			}),
 			updatePm2AppImpl: () => Promise.reject(err),
 		})
@@ -893,6 +976,11 @@ describe("src/cli.ts wiring", () => {
 				env: "prod",
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
+				events: {
+					gitSha: "abc1234",
+					releaseVersion: "v1.2.3",
+					sinks: [],
+				},
 			}),
 			computeClientChurnReportImpl: computeMock,
 			runBuildImpl: runBuildMock,
@@ -937,6 +1025,11 @@ describe("src/cli.ts wiring", () => {
 				env: "prod",
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
+				events: {
+					gitSha: "abc1234",
+					releaseVersion: "v1.2.3",
+					sinks: [],
+				},
 			}),
 			runTestsImpl: () => {
 				phaseOrder.push("tests")
@@ -976,7 +1069,9 @@ describe("src/cli.ts wiring", () => {
 		expect(publishDeployEvent).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "deploy.completed",
+				gitSha: "abc1234",
 				profileName: "p",
+				releaseVersion: "v1.2.3",
 				status: "completed",
 			}),
 			expect.anything(),
@@ -997,6 +1092,8 @@ describe("src/cli.ts wiring", () => {
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
 				events: {
+					gitSha: "abc1234",
+					releaseVersion: "v1.2.3",
 					sinks: [],
 				},
 			}),
@@ -1018,7 +1115,9 @@ describe("src/cli.ts wiring", () => {
 		expect(publishDeployEvent).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "deploy.degraded",
+				gitSha: "abc1234",
 				profileName: "p",
+				releaseVersion: "v1.2.3",
 				status: "degraded",
 			}),
 			expect.anything(),
@@ -1039,6 +1138,8 @@ describe("src/cli.ts wiring", () => {
 				pm2AppName: "app",
 				pm2RestartMode: "startOrReload" as const,
 				events: {
+					gitSha: "abc1234",
+					releaseVersion: "v1.2.3",
 					sinks: [],
 				},
 			}),
@@ -1062,7 +1163,9 @@ describe("src/cli.ts wiring", () => {
 		expect(publishDeployEvent).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "deploy.failed",
+				gitSha: "abc1234",
 				profileName: "p",
+				releaseVersion: "v1.2.3",
 				status: "failed",
 			}),
 			expect.anything(),

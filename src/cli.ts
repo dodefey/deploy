@@ -751,6 +751,7 @@ function buildDeployArgs(
 		groupRules: [],
 	}
 	const loggingDefaults = resolveLoggingConfig(merged.logging)
+	const events = resolveDeployEventsConfig(merged.events)
 
 	return {
 		sshConnectionString: merged.sshConnectionString,
@@ -768,7 +769,7 @@ function buildDeployArgs(
 		churnOnly: values.churnOnly,
 		profileName: merged.name,
 		logging: loggingDefaults,
-		events: merged.events ?? { sinks: [] },
+		events,
 		churnDiagnostics: resolveChurnDiagnosticsMode(
 			values.churnDiagnostics,
 			churnDefaults.diagnosticsDefault,
@@ -781,6 +782,26 @@ function buildDeployArgs(
 		),
 		churnGroupRules: churnDefaults.groupRules,
 	}
+}
+
+function resolveDeployEventsConfig(
+	events: TResolvedEventsConfig | undefined,
+): TResolvedEventsConfig {
+	const resolved = events ?? { sinks: [] }
+	return {
+		...resolved,
+		gitSha:
+			resolved.gitSha ?? readOptionalEnvString(process.env.DEPLOY_GIT_SHA),
+		releaseVersion:
+			resolved.releaseVersion ??
+			readOptionalEnvString(process.env.DEPLOY_RELEASE_VERSION),
+	}
+}
+
+function readOptionalEnvString(value: string | undefined): string | undefined {
+	if (typeof value !== "string") return undefined
+	const trimmed = value.trim()
+	return trimmed.length > 0 ? trimmed : undefined
 }
 
 function resolveChurnDiagnosticsMode(
@@ -1225,6 +1246,8 @@ async function emitTerminalDeployEvent(
 			type,
 			timestamp: new Date().toISOString(),
 			deployId,
+			gitSha: deploy.events?.gitSha,
+			releaseVersion: deploy.events?.releaseVersion,
 			profileName: deploy.profileName,
 			status,
 			message: event.message,
@@ -1285,6 +1308,7 @@ export const __test__: Record<string, unknown> = {
 	createDeployVitestArgs,
 	writeVitestReportToDeployLog,
 	resolveLogFilePath,
+	resolveDeployEventsConfig,
 	formatRunTimestamp,
 	noop,
 }

@@ -104,6 +104,22 @@ If `--churnOnly` is set:
 
 These events are separate from human-facing logging and are delivered only to configured sinks.
 
+Event payload shape:
+
+```ts
+interface TDeployEvent {
+  type: "deploy.completed" | "deploy.failed" | "deploy.degraded"
+  timestamp: string
+  deployId: string
+  gitSha?: string
+  releaseVersion?: string
+  profileName: string
+  status: "completed" | "failed" | "degraded"
+  message: string
+  data?: Record<string, unknown>
+}
+```
+
 ---
 
 ## 5. Phase Behavior
@@ -171,6 +187,8 @@ These events are separate from human-facing logging and are delivered only to co
 - In v1, the only sink type is `http-webhook`.
 - In v1, only terminal deploy events are emitted.
 - Webhook payloads use the generic deploy event shape rather than a consumer-specific marker payload.
+- `events.gitSha` and `events.releaseVersion`, when configured, are copied into the emitted payload.
+- If those fields are absent from config, runtime env vars `DEPLOY_GIT_SHA` and `DEPLOY_RELEASE_VERSION` are used as generic fallbacks.
 - Webhook delivery failures are non-fatal by default and become fatal only when the sink sets `fatal: true`.
 
 ---

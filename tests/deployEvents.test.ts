@@ -6,6 +6,8 @@ const baseEvent: TDeployEvent = {
 	type: "deploy.completed",
 	timestamp: "2026-03-23T12:00:00.000Z",
 	deployId: "deploy-1",
+	gitSha: "abc1234",
+	releaseVersion: "v1.2.3",
 	profileName: "prod",
 	status: "completed",
 	message: "Deploy completed successfully.",
