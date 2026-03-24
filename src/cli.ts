@@ -2,6 +2,7 @@
 
 import { cli, define } from "gunshi"
 import { createWriteStream, promises as fs, type WriteStream } from "node:fs"
+import { randomUUID } from "node:crypto"
 import * as os from "node:os"
 import * as path from "node:path"
 import type { TBuildOutputMode } from "./build.js"
@@ -13,9 +14,11 @@ import type { TChurnReportV1 } from "./churnSchema.js"
 import type {
 	TConfigErrorCode,
 	TResolvedConfig,
+	TResolvedEventsConfig,
 	TResolvedLoggingConfig,
 } from "./config.js"
 import { listProfiles, resolveProfile } from "./config.js"
+import { publishDeployEvent } from "./deployEvents.js"
 import {
 	createCompositeLoggerSink,
 	createWriterLoggerSink,
@@ -123,6 +126,7 @@ interface TDeployArgs {
 	churnOnly: boolean
 	profileName: string
 	logging?: TResolvedLoggingConfig
+	events?: TResolvedEventsConfig
 	churnDiagnostics?: TChurnDiagnosticsMode
 	churnTopN?: number
 	churnReportOut?: string
@@ -134,6 +138,7 @@ type TChurnDiagnosticsMode = "off" | "compact" | "full" | "json"
 type TResolvedConfigWithOptionalChurn = Omit<TResolvedConfig, "churn" | "logging"> & {
 	churn?: TResolvedConfig["churn"]
 	logging?: TResolvedConfig["logging"]
+	events?: TResolvedConfig["events"]
 }
 
 const deployCommand = define({
@@ -268,6 +273,7 @@ const deployCommand = define({
 
 		let deploy: TDeployArgs
 		let logWriter: TRunLogWriter | undefined
+		let deployId: string | undefined
 		try {
 			const resolved = selectConfig(values.profile, values.verbose)
 			const merged = applyOverrides(resolved, values)
@@ -282,6 +288,7 @@ const deployCommand = define({
 				churnReportOut: values.churnReportOut,
 				churnHistoryOut: values.churnHistoryOut,
 			})
+			deployId = randomUUID()
 			lastProfileUsed = deploy.profileName
 			if (resolveLoggingConfig(deploy.logging).file.enabled) {
 				logWriter = await createRunLogWriter(deploy)
@@ -295,19 +302,43 @@ const deployCommand = define({
 
 			if (deploy.churnOnly) {
 				await runChurnOnlyMode(deploy, logWriter)
+				await emitTerminalDeployEvent(deploy, deployId, "deploy.completed", {
+					message: `Churn-only run completed successfully for profile "${deploy.profileName}".`,
+				})
 				return
 			}
 
 			logDeployStart({ profileName: deploy.profileName })
+			let degraded = false
 
 			await runTestPhase(deploy, logWriter)
 
 			await runBuildPhase(deploy, logWriter)
 			await runSyncPhase(deploy, logWriter)
-			await runPm2Phase(deploy, logWriter)
-			await runChurnPhase(deploy, logWriter)
+			degraded = (await runPm2Phase(deploy, logWriter)) || degraded
+			degraded = (await runChurnPhase(deploy, logWriter)) || degraded
 			logDeploySuccess({ profileName: deploy.profileName })
+			await emitTerminalDeployEvent(
+				deploy,
+				deployId,
+				degraded ? "deploy.degraded" : "deploy.completed",
+				{
+					message: degraded
+						? `Deploy completed with non-fatal issues for profile "${deploy.profileName}".`
+						: `Deploy completed successfully for profile "${deploy.profileName}".`,
+				},
+			)
 			return
+		} catch (err) {
+			if (deploy && deployId && isFatalDeployError(err)) {
+				await emitTerminalDeployEvent(deploy, deployId, "deploy.failed", {
+					message: `Deploy failed for profile "${deploy.profileName}".`,
+					data: {
+						error: toErrorMessage(err),
+					},
+				})
+			}
+			throw err
 		} finally {
 			setLoggerSink(null)
 			await logWriter?.close()
@@ -477,11 +508,11 @@ async function runSyncPhase(
 async function runPm2Phase(
 	values: TDeployArgs,
 	logWriter?: TRunLogWriter,
-): Promise<void> {
+): Promise<boolean> {
 	logPhaseStart(`Updating PM2 app "${values.pm2AppName}"`)
 	if (values.dryRun) {
 		logPhaseSuccess("PM2 update complete: skipped.")
-		return
+		return false
 	}
 
 	writeDeployLogEvent(logWriter, {
@@ -534,6 +565,7 @@ async function runPm2Phase(
 			instanceCount: result.instanceCount,
 			profileName: values.profileName,
 		})
+		return false
 	} catch (err) {
 		writePhaseErrorEvent(logWriter, "pm2", err)
 		if (err instanceof Error && err.cause === "PM2_APP_NAME_NOT_FOUND") {
@@ -542,6 +574,7 @@ async function runPm2Phase(
 			logNonFatalError("PM2 update", err, {
 				profileName: values.profileName,
 			})
+			return true
 		}
 	}
 }
@@ -549,15 +582,17 @@ async function runPm2Phase(
 async function runChurnPhase(
 	values: TDeployArgs,
 	_logWriter?: TRunLogWriter,
-): Promise<void> {
+): Promise<boolean> {
 	logPhaseStart("Computing client churn metrics")
 	try {
 		await runChurnAnalysis(values, "deploy")
 		logPhaseSuccess("Client churn analysis complete.")
+		return false
 	} catch (err) {
 		logNonFatalError("Client churn", err, {
 			profileName: values.profileName,
 		})
+		return true
 	}
 }
 
@@ -692,6 +727,7 @@ function applyOverrides(
 		buildArgs: config.buildArgs,
 		churn: config.churn,
 		logging: config.logging,
+		events: config.events,
 	}
 }
 
@@ -732,6 +768,7 @@ function buildDeployArgs(
 		churnOnly: values.churnOnly,
 		profileName: merged.name,
 		logging: loggingDefaults,
+		events: merged.events ?? { sinks: [] },
 		churnDiagnostics: resolveChurnDiagnosticsMode(
 			values.churnDiagnostics,
 			churnDefaults.diagnosticsDefault,
@@ -1163,6 +1200,38 @@ function handleFatalError(
 ): never {
 	logFatalError(label, err, { profileName })
 	throw fatalDeployError(err)
+}
+
+async function emitTerminalDeployEvent(
+	deploy: TDeployArgs,
+	deployId: string | undefined,
+	type: "deploy.completed" | "deploy.failed" | "deploy.degraded",
+	event: {
+		message: string
+		data?: Record<string, unknown>
+	},
+): Promise<void> {
+	if (!deployId) return
+
+	const status =
+		type === "deploy.failed"
+			? "failed"
+			: type === "deploy.degraded"
+				? "degraded"
+				: "completed"
+
+	await publishDeployEvent(
+		{
+			type,
+			timestamp: new Date().toISOString(),
+			deployId,
+			profileName: deploy.profileName,
+			status,
+			message: event.message,
+			data: event.data,
+		},
+		deploy.events,
+	)
 }
 
 function fatalDeployError(cause: unknown): Error {

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- docs: record a known issue where real deploy/task terminals can lose Vitest's final failure detail block even though the child test process exits with code `1`; note that switching deploy-mode tests from `--reporter=verbose` to `--reporter=default` did not resolve the problem in a real Nuxt/Vitest project.
+
 ## v0.3.0 - 2026-03-20
 
 - change: verbose deploy phases now inherit child stdio directly so terminal output matches the underlying test/build/deploy tools instead of passing through a replay wrapper.

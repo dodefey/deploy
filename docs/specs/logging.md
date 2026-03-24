@@ -12,6 +12,7 @@ This project introduces:
 - A structured deploy record in file logging mode.
 
 This spec **does not** change deploy semantics, exit codes, or module behavior.
+Generic deploy event publishing is separate from this logging contract.
 
 ---
 

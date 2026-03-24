@@ -54,6 +54,7 @@ Resolved values are normalized into `TDeployArgs`, including:
 - Connection/build/runtime values.
 - Runtime flags.
 - Resolved profile logging config.
+- Resolved profile event sink config.
 - Churn diagnostics options (`churnDiagnostics`, `churnTopN`, `churnReportOut`, `churnHistoryOut`).
 
 ### 3.3 Churn defaults
@@ -93,6 +94,16 @@ If `--churnOnly` is set:
 - Skip test/build/sync/PM2 phases.
 - Run `runChurnOnlyMode`.
 
+### 4.3 Terminal deploy events
+
+`src/cli.ts` also emits terminal deploy lifecycle events through the generic publisher in `src/deployEvents.ts`.
+
+- `deploy.completed` when a full deploy or churn-only run completes without non-fatal degradation.
+- `deploy.degraded` when the deploy completes but PM2 or full-deploy churn encountered a non-fatal error.
+- `deploy.failed` when a fatal deploy phase fails after config resolution has succeeded.
+
+These events are separate from human-facing logging and are delivered only to configured sinks.
+
 ---
 
 ## 5. Phase Behavior
@@ -106,6 +117,7 @@ If `--churnOnly` is set:
 - In verbose mode, terminal output for the test phase must match exactly what the user would see if they ran the underlying test command directly in the terminal.
 - That requirement includes the live Vitest terminal stream: startup banner, incremental `Test Files` / `Tests` counters, per-file progress lines such as `❯ ... 0/7`, queued/running transitions, and other TTY-visible status output that appears during a normal direct run.
 - Verbose test execution must preserve direct terminal behavior by letting the test command own the terminal through inherited stdio.
+- Known issue: some real task/integrated-terminal environments still lose Vitest's final failed-test detail block even when deploy preserves inherited stdio and the child exits with code `1`. We reproduced this on March 21, 2026 in a Nuxt app using Vitest `v4.1.0`; swapping deploy-mode tests from `--reporter=verbose` to `--reporter=default` did not fix the real-project behavior, so the JSON reporter artifact remains the only deploy-controlled failure record known to be reliable across environments.
 - Quiet mode may write raw stdout/stderr chunks to the optional log file and does not replay them to the terminal.
 - If file logging is enabled, the run log must record which tests were run and the final pass/fail outcome for those tests, including failed test names and assertion details when failures occur.
 - Failure is fatal.
@@ -153,6 +165,14 @@ If `--churnOnly` is set:
 - Full deploy churn failures are non-fatal.
 - Churn-only failures are fatal.
 
+### 5.7 Event delivery
+
+- Event publishing is configured from profile `events.sinks`.
+- In v1, the only sink type is `http-webhook`.
+- In v1, only terminal deploy events are emitted.
+- Webhook payloads use the generic deploy event shape rather than a consumer-specific marker payload.
+- Webhook delivery failures are non-fatal by default and become fatal only when the sink sets `fatal: true`.
+
 ---
 
 ## 6. Logging Contract
@@ -166,6 +186,8 @@ If `--churnOnly` is set:
 - fatal and non-fatal error logs
 
 If profile file logging is enabled, the same deploy logs are also written to the run log file. That file is a separate deploy record: it must contain lifecycle lines, command metadata, typed errors, phase results, and enough phase-specific detail to reconstruct what happened. For the test phase, the log must contain the observed test execution details and outcomes: which tests ran, which passed, and which failed if any, including failure details before the process exits.
+
+Deploy event publishing is a separate concern from logging. Human-facing logs remain owned by `src/deployLogging.ts`; event sinks consume structured terminal-state events for external systems.
 
 ---
 
