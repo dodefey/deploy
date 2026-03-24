@@ -135,7 +135,10 @@ interface TDeployArgs {
 }
 
 type TChurnDiagnosticsMode = "off" | "compact" | "full" | "json"
-type TResolvedConfigWithOptionalChurn = Omit<TResolvedConfig, "churn" | "logging"> & {
+type TResolvedConfigWithOptionalChurn = Omit<
+	TResolvedConfig,
+	"churn" | "logging"
+> & {
 	churn?: TResolvedConfig["churn"]
 	logging?: TResolvedConfig["logging"]
 	events?: TResolvedConfig["events"]
@@ -302,9 +305,14 @@ const deployCommand = define({
 
 			if (deploy.churnOnly) {
 				await runChurnOnlyMode(deploy, logWriter)
-				await emitTerminalDeployEvent(deploy, deployId, "deploy.completed", {
-					message: `Churn-only run completed successfully for profile "${deploy.profileName}".`,
-				})
+				await emitTerminalDeployEvent(
+					deploy,
+					deployId,
+					"deploy.completed",
+					{
+						message: `Churn-only run completed successfully for profile "${deploy.profileName}".`,
+					},
+				)
 				return
 			}
 
@@ -331,12 +339,17 @@ const deployCommand = define({
 			return
 		} catch (err) {
 			if (deployId && isFatalDeployError(err)) {
-				await emitTerminalDeployEvent(deploy, deployId, "deploy.failed", {
-					message: `Deploy failed for profile "${deploy.profileName}".`,
-					data: {
-						error: toErrorMessage(err),
+				await emitTerminalDeployEvent(
+					deploy,
+					deployId,
+					"deploy.failed",
+					{
+						message: `Deploy failed for profile "${deploy.profileName}".`,
+						data: {
+							error: toErrorMessage(err),
+						},
 					},
-				})
+				)
 			}
 			throw err
 		} finally {
@@ -439,7 +452,10 @@ async function runTestPhase(
 		phaseError = err
 	} finally {
 		if (reportArtifact) {
-			await writeVitestReportToDeployLog(logWriter, reportArtifact.reportPath)
+			await writeVitestReportToDeployLog(
+				logWriter,
+				reportArtifact.reportPath,
+			)
 			await fs.rm(reportArtifact.dir, { recursive: true, force: true })
 		}
 	}
@@ -466,15 +482,15 @@ async function runSyncPhase(
 		message: "Syncing client bundle to server",
 	})
 	const handlers = createPhaseOutputHandlers(values, logWriter)
-		const options = {
-			sshConnectionString: values.sshConnectionString,
-			remoteDir: values.remoteDir,
-			localOutputDir: values.buildDir,
-			dryRun: values.dryRun,
-			outputMode: handlers.outputMode,
-			onStdoutChunk: handlers.onStdoutChunk,
-			onStderrChunk: handlers.onStderrChunk,
-		}
+	const options = {
+		sshConnectionString: values.sshConnectionString,
+		remoteDir: values.remoteDir,
+		localOutputDir: values.buildDir,
+		dryRun: values.dryRun,
+		outputMode: handlers.outputMode,
+		onStdoutChunk: handlers.onStdoutChunk,
+		onStderrChunk: handlers.onStderrChunk,
+	}
 	writeDeployLogEvent(logWriter, {
 		phase: "sync",
 		kind: "command",
@@ -793,7 +809,8 @@ function resolveDeployEventsConfig(
 	return {
 		...resolved,
 		gitSha:
-			resolved.gitSha ?? readOptionalEnvString(process.env.DEPLOY_GIT_SHA),
+			resolved.gitSha ??
+			readOptionalEnvString(process.env.DEPLOY_GIT_SHA),
 		releaseVersion:
 			resolved.releaseVersion ??
 			readOptionalEnvString(process.env.DEPLOY_RELEASE_VERSION),
@@ -1119,7 +1136,10 @@ function writePhaseErrorEvent(
 		kind: "error",
 		message: toErrorMessage(err),
 		data: {
-			code: err instanceof Error && typeof err.cause === "string" ? err.cause : undefined,
+			code:
+				err instanceof Error && typeof err.cause === "string"
+					? err.cause
+					: undefined,
 		},
 	})
 }
@@ -1260,7 +1280,8 @@ async function emitTerminalDeployEvent(
 }
 
 function fatalDeployError(cause: unknown): Error {
-	const err = cause instanceof Error ? cause : new Error(toErrorMessage(cause))
+	const err =
+		cause instanceof Error ? cause : new Error(toErrorMessage(cause))
 	Object.defineProperty(err, FATAL_DEPLOY_ERROR, {
 		value: true,
 		enumerable: false,

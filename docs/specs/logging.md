@@ -44,8 +44,12 @@ Generic deploy event publishing is separate from this logging contract.
 
 ```ts
 outputMode: "callbacks"
-onStdoutChunk: (chunk) => { /* optional quiet-mode file capture only */ }
-onStderrChunk: (chunk) => { /* optional quiet-mode file capture only */ }
+onStdoutChunk: (chunk) => {
+	/* optional quiet-mode file capture only */
+}
+onStderrChunk: (chunk) => {
+	/* optional quiet-mode file capture only */
+}
 ```
 
 ---

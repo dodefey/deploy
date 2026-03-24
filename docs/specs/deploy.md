@@ -108,15 +108,15 @@ Event payload shape:
 
 ```ts
 interface TDeployEvent {
-  type: "deploy.completed" | "deploy.failed" | "deploy.degraded"
-  timestamp: string
-  deployId: string
-  gitSha?: string
-  releaseVersion?: string
-  profileName: string
-  status: "completed" | "failed" | "degraded"
-  message: string
-  data?: Record<string, unknown>
+	type: "deploy.completed" | "deploy.failed" | "deploy.degraded"
+	timestamp: string
+	deployId: string
+	gitSha?: string
+	releaseVersion?: string
+	profileName: string
+	status: "completed" | "failed" | "degraded"
+	message: string
+	data?: Record<string, unknown>
 }
 ```
 

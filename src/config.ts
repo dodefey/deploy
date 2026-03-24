@@ -422,7 +422,11 @@ function validateLoggingFileConfig(
 	const dir =
 		value.dir === undefined
 			? DEFAULT_LOG_FILE_DIR
-			: requireString(value.dir, "CONFIG_PROFILE_INVALID", "logging.file.dir")
+			: requireString(
+					value.dir,
+					"CONFIG_PROFILE_INVALID",
+					"logging.file.dir",
+				)
 
 	const mode =
 		value.mode === undefined
@@ -511,7 +515,10 @@ function validateEventSink(
 	const on =
 		value.on === undefined
 			? [...DEFAULT_EVENT_TYPES]
-			: validateEventTypeList(value.on, `events.sinks[${String(index)}].on`)
+			: validateEventTypeList(
+					value.on,
+					`events.sinks[${String(index)}].on`,
+				)
 
 	const timeoutMs =
 		value.timeoutMs === undefined

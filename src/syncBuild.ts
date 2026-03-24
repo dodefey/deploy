@@ -190,7 +190,10 @@ function runCommand(
 			resolve(result)
 		}
 
-		const stdio = resolveStdio(runOptions.outputMode, behavior.captureOutput === true)
+		const stdio = resolveStdio(
+			runOptions.outputMode,
+			behavior.captureOutput === true,
+		)
 		const child = spawn(command, args, { stdio } as SpawnOptions)
 
 		if (runOptions.outputMode === "callbacks") {
@@ -302,7 +305,8 @@ function resolveStdio(
 	captureOutput: boolean,
 ): "inherit" | ["ignore", "ignore", "ignore"] | ["ignore", "pipe", "pipe"] {
 	if (outputMode === "silent") return ["ignore", "ignore", "ignore"]
-	if (outputMode === "callbacks" || captureOutput) return ["ignore", "pipe", "pipe"]
+	if (outputMode === "callbacks" || captureOutput)
+		return ["ignore", "pipe", "pipe"]
 	return "inherit"
 }
 

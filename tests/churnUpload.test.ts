@@ -102,7 +102,7 @@ describe("uploadRemoteManifest", () => {
 			uploadRemoteManifest(
 				"user@host",
 				"/var/www/app/.deploy/manifest.json",
-				"{\"schema\":\"x\"}\n",
+				'{"schema":"x"}\n',
 				["-o", "BatchMode=yes"],
 			),
 		).rejects.toMatchObject({

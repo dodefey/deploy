@@ -67,7 +67,11 @@ Profiles live in your project root (`./profiles.json`). The CLI looks in the cur
 				{
 					"type": "http-webhook",
 					"url": "http://127.0.0.1:4000/hooks/deploy",
-					"on": ["deploy.completed", "deploy.failed", "deploy.degraded"],
+					"on": [
+						"deploy.completed",
+						"deploy.failed",
+						"deploy.degraded"
+					],
 					"timeoutMs": 3000,
 					"retries": 1,
 					"fatal": false,

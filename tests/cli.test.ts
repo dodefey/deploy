@@ -84,7 +84,8 @@ function setupMocks(config: MockConfig = {}) {
 	const publishDeployEvent = vi.fn().mockResolvedValue(undefined)
 	const logFns = {
 		createCompositeLoggerSink: vi.fn((sinks) => ({
-			info: (line: string) => sinks.forEach((sink: any) => sink.info(line)),
+			info: (line: string) =>
+				sinks.forEach((sink: any) => sink.info(line)),
 			error: (line: string) =>
 				sinks.forEach((sink: any) => sink.error(line)),
 		})),
@@ -178,7 +179,13 @@ function setupMocks(config: MockConfig = {}) {
 			),
 	}))
 
-	return { logFns, listProfiles, resolveProfile, runTests, publishDeployEvent }
+	return {
+		logFns,
+		listProfiles,
+		resolveProfile,
+		runTests,
+		publishDeployEvent,
+	}
 }
 
 async function importMain() {
@@ -669,12 +676,8 @@ describe("src/cli.ts wiring", () => {
 			},
 		})
 
-		expect(appendPath).toContain(
-			path.join(".deploy", "logs", "deploy.log"),
-		)
-		expect(perRunPath).toMatch(
-			/deploy-prod-site-\d{8}-\d{6}\.log$/,
-		)
+		expect(appendPath).toContain(path.join(".deploy", "logs", "deploy.log"))
+		expect(perRunPath).toMatch(/deploy-prod-site-\d{8}-\d{6}\.log$/)
 	})
 
 	it("buildDeployArgs normalizes churnHistoryOut override", async () => {
@@ -829,20 +832,20 @@ describe("src/cli.ts wiring", () => {
 		const { __test__ } = await importMain()
 		await expect(
 			__test__.runPm2Phase({
-			sshConnectionString: "s",
-			remoteDir: "/r",
-			buildDir: "/b",
-			buildCommand: "npx",
-			buildArgs: ["nuxt", "build"],
-			env: "prod",
-			pm2AppName: "app",
-			pm2RestartMode: "startOrReload",
-			dryRun: false,
-			skipTests: false,
-			skipBuild: false,
-			verbose: false,
-			churnOnly: false,
-			profileName: "p",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload",
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: false,
+				churnOnly: false,
+				profileName: "p",
 			}),
 		).rejects.toBe(fatalError)
 
@@ -1257,20 +1260,20 @@ describe("src/cli.ts wiring", () => {
 
 		await expect(
 			__test__.runTestPhase({
-			sshConnectionString: "s",
-			remoteDir: "/r",
-			buildDir: "/b",
-			buildCommand: "npx",
-			buildArgs: ["nuxt", "build"],
-			env: "prod",
-			pm2AppName: "app",
-			pm2RestartMode: "startOrReload",
-			dryRun: false,
-			skipTests: false,
-			skipBuild: false,
-			verbose: false,
-			churnOnly: false,
-			profileName: "p",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload",
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: false,
+				churnOnly: false,
+				profileName: "p",
 			}),
 		).rejects.toBe(testError)
 
@@ -1777,20 +1780,20 @@ describe("src/cli.ts wiring", () => {
 		const { __test__ } = await importMain()
 		await expect(
 			__test__.runChurnOnlyMode({
-			sshConnectionString: "s",
-			remoteDir: "/r",
-			buildDir: "/b",
-			buildCommand: "npx",
-			buildArgs: ["nuxt", "build"],
-			env: "prod",
-			pm2AppName: "app",
-			pm2RestartMode: "startOrReload",
-			dryRun: false,
-			skipTests: false,
-			skipBuild: false,
-			verbose: false,
-			churnOnly: true,
-			profileName: "p",
+				sshConnectionString: "s",
+				remoteDir: "/r",
+				buildDir: "/b",
+				buildCommand: "npx",
+				buildArgs: ["nuxt", "build"],
+				env: "prod",
+				pm2AppName: "app",
+				pm2RestartMode: "startOrReload",
+				dryRun: false,
+				skipTests: false,
+				skipBuild: false,
+				verbose: false,
+				churnOnly: true,
+				profileName: "p",
 			}),
 		).rejects.toBe(churnError)
 
@@ -1987,15 +1990,15 @@ describe("src/cli.ts wiring", () => {
 		})
 
 		expect(computeReportMock).toHaveBeenCalled()
-			expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
-				expect.stringContaining(
-					'"schema":"com.dodefey.churn-history-record"',
-				),
-			)
-			expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
-				expect.stringContaining(
-					'"report":{"schema":"com.dodefey.churn-report"',
-				),
-			)
-		})
+		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
+			expect.stringContaining(
+				'"schema":"com.dodefey.churn-history-record"',
+			),
+		)
+		expect(logFns.logPhaseSuccess).toHaveBeenCalledWith(
+			expect.stringContaining(
+				'"report":{"schema":"com.dodefey.churn-report"',
+			),
+		)
 	})
+})

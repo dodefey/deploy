@@ -255,5 +255,4 @@ describe("syncBuild", () => {
 		expect(out).toEqual(["line1\nline2"])
 		expect(err).toEqual(["warn1\r\nwarn2"])
 	})
-
 })
