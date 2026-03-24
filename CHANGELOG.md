@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - docs: record a known issue where real deploy/task terminals can lose Vitest's final failure detail block even though the child test process exits with code `1`; note that switching deploy-mode tests from `--reporter=verbose` to `--reporter=default` did not resolve the problem in a real Nuxt/Vitest project.
+- change: add generic terminal deploy event publishing with configurable `http-webhook` sinks for `deploy.completed`, `deploy.failed`, and `deploy.degraded`.
+
+## v0.3.1 - 2026-03-23
+
+- change: add generic terminal deploy event publishing with configurable `http-webhook` sinks for `deploy.completed`, `deploy.failed`, and `deploy.degraded`.
+- docs: document event sink profile config and clarify that webhook delivery is generic rather than `server-monitor` specific.
 
 ## v0.3.0 - 2026-03-20
 
