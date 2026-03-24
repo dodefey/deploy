@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - docs: record a known issue where real deploy/task terminals can lose Vitest's final failure detail block even though the child test process exits with code `1`; note that switching deploy-mode tests from `--reporter=verbose` to `--reporter=default` did not resolve the problem in a real Nuxt/Vitest project.
-- change: add generic terminal deploy event publishing with configurable `http-webhook` sinks for `deploy.completed`, `deploy.failed`, and `deploy.degraded`.
+
+## v0.3.2 - 2026-03-24
+
+- change: support optional `gitSha` and `releaseVersion` fields in generic deploy webhook events so consumers such as `server-monitor` can record richer deploy markers.
+- change: fall back to generic runtime env vars `DEPLOY_GIT_SHA` and `DEPLOY_RELEASE_VERSION` when profile event metadata is omitted.
+- docs: document profile and env-based deploy event metadata configuration for webhook sinks.
 
 ## v0.3.1 - 2026-03-23
 
