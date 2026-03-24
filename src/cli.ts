@@ -330,7 +330,7 @@ const deployCommand = define({
 			)
 			return
 		} catch (err) {
-			if (deploy && deployId && isFatalDeployError(err)) {
+			if (deployId && isFatalDeployError(err)) {
 				await emitTerminalDeployEvent(deploy, deployId, "deploy.failed", {
 					message: `Deploy failed for profile "${deploy.profileName}".`,
 					data: {
@@ -466,15 +466,15 @@ async function runSyncPhase(
 		message: "Syncing client bundle to server",
 	})
 	const handlers = createPhaseOutputHandlers(values, logWriter)
-	const options = {
-		sshConnectionString: values.sshConnectionString,
-		remoteDir: values.remoteDir,
-		localOutputDir: values.buildDir,
-		dryRun: values.dryRun,
-		outputMode: handlers.outputMode as TBuildOutputMode,
-		onStdoutChunk: handlers.onStdoutChunk,
-		onStderrChunk: handlers.onStderrChunk,
-	}
+		const options = {
+			sshConnectionString: values.sshConnectionString,
+			remoteDir: values.remoteDir,
+			localOutputDir: values.buildDir,
+			dryRun: values.dryRun,
+			outputMode: handlers.outputMode,
+			onStdoutChunk: handlers.onStdoutChunk,
+			onStderrChunk: handlers.onStderrChunk,
+		}
 	writeDeployLogEvent(logWriter, {
 		phase: "sync",
 		kind: "command",
@@ -581,8 +581,9 @@ async function runPm2Phase(
 
 async function runChurnPhase(
 	values: TDeployArgs,
-	_logWriter?: TRunLogWriter,
+	logWriter?: TRunLogWriter,
 ): Promise<boolean> {
+	void logWriter
 	logPhaseStart("Computing client churn metrics")
 	try {
 		await runChurnAnalysis(values, "deploy")
@@ -598,8 +599,9 @@ async function runChurnPhase(
 
 async function runChurnOnlyMode(
 	values: TDeployArgs,
-	_logWriter?: TRunLogWriter,
+	logWriter?: TRunLogWriter,
 ): Promise<void> {
+	void logWriter
 	logChurnOnlyStart({ profileName: values.profileName })
 	logPhaseStart("Computing client churn metrics")
 	try {

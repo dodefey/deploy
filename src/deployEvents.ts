@@ -84,12 +84,14 @@ async function postWebhookEvent(
 
 		if (!response.ok) {
 			throw new Error(
-				`Webhook responded with ${response.status} ${response.statusText}`.trim(),
+				`Webhook responded with ${String(response.status)} ${response.statusText}`.trim(),
 			)
 		}
 	} catch (err) {
 		if (err instanceof Error && err.name === "AbortError") {
-			throw new Error(`Webhook request timed out after ${sink.timeoutMs}ms`)
+			throw new Error(
+				`Webhook request timed out after ${String(sink.timeoutMs)}ms`,
+			)
 		}
 		throw err
 	} finally {
